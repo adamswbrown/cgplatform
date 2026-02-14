@@ -1,0 +1,76 @@
+<svg
+  xmlns="http://www.w3.org/2000/svg"
+  viewBox="0 0 1360 260"
+  role="img"
+  aria-labelledby="logo-title logo-desc"
+>
+  <title id="logo-title">Case Workflow</title>
+  <desc id="logo-desc">Case Workflow wordmark with two counseling-inspired speech bubbles.</desc>
+
+  <defs>
+    <style>
+      .wordmark {
+        font-family: "Poppins", "Avenir Next", "Segoe UI", sans-serif;
+        font-size: 108px;
+        font-weight: 700;
+        letter-spacing: 0.6px;
+        fill: #052e1e;
+      }
+      .tagline {
+        font-family: "Poppins", "Avenir Next", "Segoe UI", sans-serif;
+        font-size: 30px;
+        font-weight: 500;
+        letter-spacing: 3.2px;
+        fill: #496d59;
+      }
+    </style>
+  </defs>
+
+  <g transform="translate(20 20)">
+    <g transform="translate(0 6)">
+      <circle cx="70" cy="88" r="58" fill="#b7c9bb" />
+      <path d="M30 131L22 163L52 145Z" fill="#b7c9bb" />
+
+      <path
+        d="M32 88c10-16 30-16 40 0s30 16 40 0 30-16 40 0"
+        fill="none"
+        stroke="#1e4c3a"
+        stroke-width="4"
+        stroke-linecap="round"
+      />
+      <path
+        d="M44 66c8 12 20 12 28 0s20-12 28 0 20 12 28 0"
+        fill="none"
+        stroke="#1e4c3a"
+        stroke-width="3"
+        stroke-linecap="round"
+        opacity="0.9"
+      />
+      <path
+        d="M44 110c8-12 20-12 28 0s20 12 28 0 20-12 28 0"
+        fill="none"
+        stroke="#1e4c3a"
+        stroke-width="3"
+        stroke-linecap="round"
+        opacity="0.9"
+      />
+
+      <circle cx="166" cy="98" r="54" fill="#f7f5f1" stroke="#496d59" stroke-width="6" />
+      <path d="M184 141l9 24-24-13z" fill="#f7f5f1" stroke="#496d59" stroke-width="6" stroke-linejoin="round" />
+      <path
+        d="M166 98c0-17 25-17 25 0s-25 17-25 0
+           17-17 17 0
+           -11 11-11 0
+           7-7 7 0"
+        fill="none"
+        stroke="#496d59"
+        stroke-width="4"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+      />
+    </g>
+
+    <text class="wordmark" x="258" y="128">Case Workflow</text>
+    <text class="tagline" x="262" y="182">CARE PLATFORM</text>
+  </g>
+</svg>

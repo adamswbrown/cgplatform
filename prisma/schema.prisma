@@ -1,0 +1,206 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  OPS
+  SPECIALIST
+}
+
+enum CaseStatus {
+  NEW
+  AWAITING_REVIEW
+  MATCHED
+  AGREEMENT_PENDING
+  READY_TO_SCHEDULE
+  SCHEDULED
+  IN_SESSION
+  COMPLETED
+  CLOSED
+}
+
+enum SessionStatus {
+  SCHEDULED
+  IN_SESSION
+  COMPLETED
+  CANCELLED
+}
+
+enum ParticipantRole {
+  PRIMARY
+  SECONDARY
+}
+
+enum DocumentState {
+  SENT
+  COMPLETED
+}
+
+model Client {
+  id           String            @id @default(cuid())
+  firstName    String
+  lastName     String
+  email        String
+  phone        String?
+  participants CaseParticipant[]
+  createdAt    DateTime          @default(now())
+  updatedAt    DateTime          @updatedAt
+}
+
+model Case {
+  id                   String             @id @default(cuid())
+  reference            String             @unique
+  status               CaseStatus         @default(NEW)
+  notes                String?
+  flags                String[]           @default([])
+  manualOverride       Boolean            @default(false)
+  assignedSpecialistId String?
+  assignedSpecialist   Specialist?        @relation("CaseAssignedSpecialist", fields: [assignedSpecialistId], references: [id], onDelete: SetNull)
+  participants         CaseParticipant[]
+  sessions             Session[]
+  documents            DocumentInstance[]
+  auditLogs            AuditLog[]
+  createdAt            DateTime           @default(now())
+  updatedAt            DateTime           @updatedAt
+
+  @@index([status])
+  @@index([assignedSpecialistId])
+}
+
+model CaseParticipant {
+  id        String          @id @default(cuid())
+  caseId    String
+  clientId  String
+  role      ParticipantRole @default(PRIMARY)
+  case      Case            @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  client    Client          @relation(fields: [clientId], references: [id], onDelete: Restrict)
+  createdAt DateTime        @default(now())
+
+  @@unique([caseId, clientId])
+  @@index([caseId])
+}
+
+model Specialist {
+  id                        String       @id @default(cuid())
+  name                      String
+  email                     String       @unique
+  supportsCouples           Boolean      @default(false)
+  active                    Boolean      @default(true)
+  capabilities              String[]     @default([])
+  notes                     String?
+  calUserId                 String       @unique
+  calIndividualEventTypeId  String
+  calCouplesEventTypeId     String?
+  sessions                  Session[]
+  assignedCases             Case[]       @relation("CaseAssignedSpecialist")
+  userAccount               UserAccount?
+  createdAt                 DateTime     @default(now())
+  updatedAt                 DateTime     @updatedAt
+}
+
+model Session {
+  id                String        @id @default(cuid())
+  caseId            String
+  specialistId      String
+  status            SessionStatus @default(SCHEDULED)
+  providerBookingId String        @unique
+  providerStartTime DateTime
+  providerEndTime   DateTime
+  providerType      String
+  notes             String?
+  case              Case          @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  specialist        Specialist    @relation(fields: [specialistId], references: [id], onDelete: Restrict)
+  documents         DocumentInstance[]
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
+
+  @@index([specialistId, providerStartTime])
+  @@index([caseId, providerStartTime])
+  @@index([providerStartTime])
+}
+
+model DocumentTemplate {
+  id            String             @id @default(cuid())
+  code          String             @unique
+  name          String
+  description   String?
+  triggerStatus CaseStatus
+  required      Boolean            @default(true)
+  instances     DocumentInstance[]
+  createdAt     DateTime           @default(now())
+  updatedAt     DateTime           @updatedAt
+}
+
+model DocumentInstance {
+  id          String         @id @default(cuid())
+  caseId      String
+  templateId  String
+  sessionId   String?
+  status      DocumentState  @default(SENT)
+  sentAt      DateTime       @default(now())
+  completedAt DateTime?
+  required    Boolean        @default(true)
+  case        Case           @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  template    DocumentTemplate @relation(fields: [templateId], references: [id], onDelete: Restrict)
+  session     Session?       @relation(fields: [sessionId], references: [id], onDelete: SetNull)
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+
+  @@unique([caseId, templateId])
+  @@index([caseId, status])
+}
+
+model AuditLog {
+  id        String       @id @default(cuid())
+  caseId    String?
+  userId    String?
+  action    String
+  details   Json?
+  case      Case?        @relation(fields: [caseId], references: [id], onDelete: SetNull)
+  user      UserAccount? @relation(fields: [userId], references: [id], onDelete: SetNull)
+  createdAt DateTime     @default(now())
+
+  @@index([caseId, createdAt])
+  @@index([userId, createdAt])
+}
+
+model UserAccount {
+  id             String          @id @default(cuid())
+  email          String          @unique
+  name           String
+  passwordHash   String
+  role           UserRole
+  specialistId   String?         @unique
+  specialist     Specialist?     @relation(fields: [specialistId], references: [id], onDelete: SetNull)
+  operationsUser OperationsUser?
+  sessions       AuthSession[]
+  auditLogs      AuditLog[]
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+}
+
+model OperationsUser {
+  id          String      @id @default(cuid())
+  userId      String      @unique
+  canOverride Boolean     @default(true)
+  user        UserAccount @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+}
+
+model AuthSession {
+  id        String      @id @default(cuid())
+  token     String      @unique
+  userId    String
+  expiresAt DateTime
+  user      UserAccount @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt DateTime    @default(now())
+
+  @@index([userId])
+  @@index([expiresAt])
+}

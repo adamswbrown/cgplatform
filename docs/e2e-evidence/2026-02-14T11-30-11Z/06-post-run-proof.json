@@ -1,0 +1,190 @@
+{
+  "generatedAt": "2026-02-14T11:31:03.328Z",
+  "durationCases": {
+    "Single30": {
+      "caseReference": "CASE-1017",
+      "participantCount": 1,
+      "requestedDuration": 30,
+      "actualDuration": 30,
+      "providerStartTime": "2026-02-16T11:00:00.000Z",
+      "providerEndTime": "2026-02-16T11:30:00.000Z"
+    },
+    "Single60": {
+      "caseReference": "CASE-1018",
+      "participantCount": 1,
+      "requestedDuration": 60,
+      "actualDuration": 60,
+      "providerStartTime": "2026-02-16T13:00:00.000Z",
+      "providerEndTime": "2026-02-16T14:00:00.000Z"
+    },
+    "Single90": {
+      "caseReference": "CASE-1019",
+      "participantCount": 1,
+      "requestedDuration": 90,
+      "actualDuration": 90,
+      "providerStartTime": "2026-02-16T14:00:00.000Z",
+      "providerEndTime": "2026-02-16T15:30:00.000Z"
+    },
+    "CoupleA30": {
+      "caseReference": "CASE-1020",
+      "participantCount": 2,
+      "requestedDuration": 30,
+      "actualDuration": 30,
+      "providerStartTime": "2026-02-16T11:30:00.000Z",
+      "providerEndTime": "2026-02-16T12:00:00.000Z"
+    },
+    "CoupleA60": {
+      "caseReference": "CASE-1021",
+      "participantCount": 2,
+      "requestedDuration": 60,
+      "actualDuration": 60,
+      "providerStartTime": "2026-02-16T15:30:00.000Z",
+      "providerEndTime": "2026-02-16T16:30:00.000Z"
+    },
+    "CoupleA90": {
+      "caseReference": "CASE-1022",
+      "participantCount": 2,
+      "requestedDuration": 90,
+      "actualDuration": 90,
+      "providerStartTime": "2026-02-17T09:00:00.000Z",
+      "providerEndTime": "2026-02-17T10:30:00.000Z"
+    }
+  },
+  "durationAssertions": {
+    "singles": true,
+    "couples": true
+  },
+  "clashAssertions": {
+    "singlePair": {
+      "sameSpecialist": true,
+      "overlaps": false,
+      "first": {
+        "caseReference": "CASE-1023",
+        "start": "2026-02-16T14:00:00.000Z",
+        "end": "2026-02-16T15:00:00.000Z"
+      },
+      "second": {
+        "caseReference": "CASE-1024",
+        "start": "2026-02-16T15:00:00.000Z",
+        "end": "2026-02-16T16:00:00.000Z"
+      }
+    },
+    "couplePair": {
+      "sameSpecialist": true,
+      "overlaps": false,
+      "first": {
+        "caseReference": "CASE-1025",
+        "start": "2026-02-17T09:00:00.000Z",
+        "end": "2026-02-17T10:30:00.000Z"
+      },
+      "second": {
+        "caseReference": "CASE-1026",
+        "start": "2026-02-17T10:30:00.000Z",
+        "end": "2026-02-17T12:00:00.000Z"
+      }
+    },
+    "globalActiveOverlapCount": 0
+  },
+  "termsGateAssertions": {
+    "single": {
+      "caseReference": "CASE-1027",
+      "status": "MATCHED",
+      "docs": [
+        {
+          "code": "TERMS_AND_CONDITIONS",
+          "status": "SENT"
+        },
+        {
+          "code": "CONTRACT",
+          "status": "SENT"
+        }
+      ]
+    },
+    "couple": {
+      "caseReference": "CASE-1028",
+      "status": "MATCHED",
+      "docs": [
+        {
+          "code": "TERMS_AND_CONDITIONS",
+          "status": "SENT"
+        },
+        {
+          "code": "CONTRACT",
+          "status": "SENT"
+        }
+      ]
+    }
+  },
+  "smokeFlowAssertion": {
+    "caseReference": "CASE-1016",
+    "status": "CLOSED",
+    "sessionStatuses": [
+      "COMPLETED"
+    ],
+    "docs": [
+      {
+        "code": "TERMS_AND_CONDITIONS",
+        "status": "COMPLETED"
+      },
+      {
+        "code": "CONTRACT",
+        "status": "COMPLETED"
+      },
+      {
+        "code": "INTAKE_FORM",
+        "status": "COMPLETED"
+      },
+      {
+        "code": "OUTTAKE_FORM",
+        "status": "COMPLETED"
+      }
+    ]
+  },
+  "specialistEditAssertion": {
+    "id": "cmlm8ixi10004ohyqxc5kklns",
+    "name": "Avery Mills",
+    "email": "avery.specialist@demo.local",
+    "notes": "Playwright updated notes 1771068657836",
+    "capabilities": [
+      "individual",
+      "playwright-1771068657836"
+    ],
+    "updatedAt": "2026-02-14T11:30:59.104Z"
+  },
+  "manualOverrideAuditLogs": [
+    {
+      "createdAt": "2026-02-14T11:31:01.711Z",
+      "caseId": "cmlm8jxd2005dohap5xpwb984",
+      "details": {
+        "reason": "playwright clash scenario",
+        "eventType": "couple",
+        "providerType": "fake",
+        "specialistId": "cmlm8ixib0006ohyqfsa6gaut",
+        "durationMinutes": 90,
+        "providerEndTime": "2026-02-17T12:00:00.000Z",
+        "previousSessionId": null,
+        "providerBookingId": "fake-cmlm8ixib0006ohyqfsa6gaut-cmlm8jxd2005dohap5xpwb984-90-20260217103000000",
+        "providerStartTime": "2026-02-17T10:30:00.000Z",
+        "matchingRuleOverride": null,
+        "previousProviderBookingId": null
+      }
+    },
+    {
+      "createdAt": "2026-02-14T11:31:01.542Z",
+      "caseId": "cmlm8jx7w004gohapjmnzkiel",
+      "details": {
+        "reason": "playwright clash scenario",
+        "eventType": "individual",
+        "providerType": "fake",
+        "specialistId": "cmlm8ixi10004ohyqxc5kklns",
+        "durationMinutes": 60,
+        "providerEndTime": "2026-02-16T16:00:00.000Z",
+        "previousSessionId": null,
+        "providerBookingId": "fake-cmlm8ixi10004ohyqxc5kklns-cmlm8jx7w004gohapjmnzkiel-60-20260216150000000",
+        "providerStartTime": "2026-02-16T15:00:00.000Z",
+        "matchingRuleOverride": null,
+        "previousProviderBookingId": null
+      }
+    }
+  ]
+}

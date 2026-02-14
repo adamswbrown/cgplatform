@@ -1,0 +1,100 @@
+{
+  "snapshotAt": "2026-02-14T11:30:15.527Z",
+  "counts": {
+    "clients": 3,
+    "cases": 2,
+    "caseParticipants": 3,
+    "specialists": 3,
+    "sessions": 1,
+    "documentTemplates": 4,
+    "documentInstances": 4,
+    "userAccounts": 4,
+    "auditLogs": 2
+  },
+  "specialists": [
+    {
+      "id": "cmlm8ixi10004ohyqxc5kklns",
+      "name": "Avery Mills",
+      "email": "avery.specialist@demo.local",
+      "supportsCouples": false,
+      "active": true,
+      "capabilities": [
+        "individual",
+        "career"
+      ]
+    },
+    {
+      "id": "cmlm8ixi80005ohyq6rizji1l",
+      "name": "Jordan Patel",
+      "email": "jordan.specialist@demo.local",
+      "supportsCouples": true,
+      "active": true,
+      "capabilities": [
+        "couples",
+        "conflict-resolution"
+      ]
+    },
+    {
+      "id": "cmlm8ixib0006ohyqfsa6gaut",
+      "name": "Morgan Lee",
+      "email": "morgan.specialist@demo.local",
+      "supportsCouples": true,
+      "active": true,
+      "capabilities": [
+        "couples",
+        "high-conflict"
+      ]
+    }
+  ],
+  "cases": [
+    {
+      "id": "cmlm8ixlh000gohyqhiw7ebyw",
+      "reference": "CASE-1001",
+      "status": "SCHEDULED",
+      "flags": [
+        "first_time_client"
+      ],
+      "assignedSpecialistId": "cmlm8ixi10004ohyqxc5kklns",
+      "participantCount": 1
+    },
+    {
+      "id": "cmlm8ixmh000oohyqc60v8ktr",
+      "reference": "CASE-1002",
+      "status": "NEW",
+      "flags": [
+        "couple",
+        "priority_match"
+      ],
+      "assignedSpecialistId": null,
+      "participantCount": 2
+    }
+  ],
+  "sessions": [
+    {
+      "id": "cmlm8ixlt000kohyqgxlvv3iq",
+      "caseId": "cmlm8ixlh000gohyqhiw7ebyw",
+      "specialistId": "cmlm8ixi10004ohyqxc5kklns",
+      "status": "SCHEDULED",
+      "providerBookingId": "fake-seed-booking-1001",
+      "providerStartTime": "2026-02-15T09:00:00.000Z",
+      "providerEndTime": "2026-02-15T10:00:00.000Z",
+      "providerType": "fake"
+    }
+  ],
+  "documentInstanceByStatus": [
+    {
+      "_count": {
+        "_all": 2
+      },
+      "status": "SENT",
+      "required": true
+    },
+    {
+      "_count": {
+        "_all": 2
+      },
+      "status": "COMPLETED",
+      "required": true
+    }
+  ]
+}

@@ -1,0 +1,29 @@
+import { CaseStatus } from "@prisma/client";
+
+export const DOCUMENT_CODES = {
+  TERMS_AND_CONDITIONS: "TERMS_AND_CONDITIONS",
+  CONTRACT: "CONTRACT",
+  INTAKE_FORM: "INTAKE_FORM",
+  OUTTAKE_FORM: "OUTTAKE_FORM",
+} as const;
+
+export const CASE_TRANSITIONS: Record<CaseStatus, CaseStatus[]> = {
+  NEW: [CaseStatus.AWAITING_REVIEW, CaseStatus.MATCHED],
+  AWAITING_REVIEW: [CaseStatus.MATCHED],
+  MATCHED: [CaseStatus.AGREEMENT_PENDING, CaseStatus.READY_TO_SCHEDULE],
+  AGREEMENT_PENDING: [CaseStatus.READY_TO_SCHEDULE],
+  READY_TO_SCHEDULE: [CaseStatus.SCHEDULED],
+  SCHEDULED: [CaseStatus.IN_SESSION],
+  IN_SESSION: [CaseStatus.COMPLETED],
+  COMPLETED: [CaseStatus.CLOSED],
+  CLOSED: [],
+};
+
+export const REQUIRED_DOCUMENTS_TO_ENTER: Partial<Record<CaseStatus, string[]>> = {
+  [CaseStatus.READY_TO_SCHEDULE]: [
+    DOCUMENT_CODES.TERMS_AND_CONDITIONS,
+    DOCUMENT_CODES.CONTRACT,
+  ],
+  [CaseStatus.IN_SESSION]: [DOCUMENT_CODES.INTAKE_FORM],
+  [CaseStatus.CLOSED]: [DOCUMENT_CODES.OUTTAKE_FORM],
+};
