@@ -5,9 +5,12 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { z } from "zod";
 import {
+  addWorkflowStep,
   allocateCaseAutomatically,
+  assignWorkflowTemplateToCase,
   canUserOverride,
   completeDocumentInstance,
+  createWorkflowTemplate,
   createCaseFromIntake,
   createSpecialist,
   domainErrorMessage,
@@ -127,6 +130,9 @@ export async function submitIntakeAction(formData: FormData) {
           }
         : undefined,
     notes: parsed.data.notes,
+    initialStatus: CaseStatus.AWAITING_REVIEW,
+    intakeSource: "WEB_FORM",
+    autoAllocate: false,
   });
 
   const query = new URLSearchParams({
@@ -356,4 +362,108 @@ export async function updateSpecialistProfileAction(formData: FormData) {
   }
 
   redirect(destination);
+}
+
+export async function assignCaseWorkflowAction(formData: FormData) {
+  const user = await requirePageUser([UserRole.OPS]);
+  const caseId = String(formData.get("caseId") || "").trim();
+  const caseWorkflowTemplateId = String(formData.get("caseWorkflowTemplateId") || "").trim();
+  const redirectTo = String(formData.get("redirectTo") || `/admin/cases/${caseId}`);
+
+  if (!caseId || !caseWorkflowTemplateId) {
+    redirect(encodeErrorPath(redirectTo, "Case and workflow template are required."));
+  }
+
+  try {
+    await assignWorkflowTemplateToCase({
+      caseId,
+      caseWorkflowTemplateId,
+      actorUserId: user.id,
+    });
+
+    revalidatePath("/admin/cases");
+    revalidatePath("/admin/workflows");
+    revalidatePath(redirectTo);
+    redirect(redirectTo);
+  } catch (error) {
+    redirect(encodeErrorPath(redirectTo, domainErrorMessage(error)));
+  }
+}
+
+export async function createWorkflowTemplateAction(formData: FormData) {
+  const user = await requirePageUser([UserRole.OPS]);
+  const code = String(formData.get("code") || "").trim();
+  const name = String(formData.get("name") || "").trim();
+  const counsellingType = String(formData.get("counsellingType") || "").trim();
+  const description = String(formData.get("description") || "").trim();
+  const isDefault = String(formData.get("isDefault") || "") === "on";
+  const redirectTo = String(formData.get("redirectTo") || "/admin/workflows");
+
+  if (!code || !name || !counsellingType) {
+    redirect(encodeErrorPath(redirectTo, "Code, name, and counselling type are required."));
+  }
+
+  try {
+    await createWorkflowTemplate({
+      code,
+      name,
+      counsellingType,
+      description: description || undefined,
+      isDefault,
+      actorUserId: user.id,
+    });
+
+    revalidatePath("/admin/workflows");
+    revalidatePath("/admin/cases");
+    redirect(redirectTo);
+  } catch (error) {
+    redirect(encodeErrorPath(redirectTo, domainErrorMessage(error)));
+  }
+}
+
+const workflowStepTypeSchema = z.enum(["FORM", "REVIEW", "SYSTEM"]);
+
+export async function addWorkflowStepAction(formData: FormData) {
+  const user = await requirePageUser([UserRole.OPS]);
+  const caseWorkflowTemplateId = String(formData.get("caseWorkflowTemplateId") || "").trim();
+  const name = String(formData.get("name") || "").trim();
+  const typeRaw = String(formData.get("type") || "").trim().toUpperCase();
+  const formType = String(formData.get("formType") || "").trim();
+  const required = String(formData.get("required") || "") === "on";
+  const blocksScheduling = String(formData.get("blocksScheduling") || "") === "on";
+  const sortOrderRaw = String(formData.get("sortOrder") || "").trim();
+  const redirectTo = String(formData.get("redirectTo") || "/admin/workflows");
+
+  if (!caseWorkflowTemplateId || !name) {
+    redirect(encodeErrorPath(redirectTo, "Workflow template and step name are required."));
+  }
+
+  const typeParsed = workflowStepTypeSchema.safeParse(typeRaw);
+  if (!typeParsed.success) {
+    redirect(encodeErrorPath(redirectTo, "Invalid workflow step type."));
+  }
+
+  const sortOrder = sortOrderRaw ? Number(sortOrderRaw) : 0;
+  if (!Number.isFinite(sortOrder)) {
+    redirect(encodeErrorPath(redirectTo, "Sort order must be a number."));
+  }
+
+  try {
+    await addWorkflowStep({
+      caseWorkflowTemplateId,
+      name,
+      type: typeParsed.data,
+      formType: formType || undefined,
+      required,
+      blocksScheduling,
+      sortOrder: Math.round(sortOrder),
+      actorUserId: user.id,
+    });
+
+    revalidatePath("/admin/workflows");
+    revalidatePath("/admin/cases");
+    redirect(redirectTo);
+  } catch (error) {
+    redirect(encodeErrorPath(redirectTo, domainErrorMessage(error)));
+  }
 }

@@ -1,0 +1,250 @@
+{
+  "snapshotAt": "2026-02-14T11:53:56.771Z",
+  "counts": {
+    "clients": 3,
+    "cases": 2,
+    "specialists": 3,
+    "workflowTemplates": 2,
+    "workflowSteps": 11,
+    "caseWorkflowStates": 11,
+    "sessions": 1,
+    "documentInstances": 4
+  },
+  "documentTemplates": [
+    {
+      "code": "CONTRACT",
+      "name": "Engagement Contract"
+    },
+    {
+      "code": "COUPLES_PREP_FORM",
+      "name": "Couples Preparation Form"
+    },
+    {
+      "code": "INTAKE_FORM",
+      "name": "Session Intake Form"
+    },
+    {
+      "code": "OUTTAKE_FORM",
+      "name": "Session Outtake Form"
+    },
+    {
+      "code": "TERMS_AND_CONDITIONS",
+      "name": "Terms & Conditions"
+    }
+  ],
+  "workflowTemplates": [
+    {
+      "id": "cmlm9de59000hohwxuuqd3zoy",
+      "code": "COUPLES_COUNSELLING",
+      "name": "Couples Counselling",
+      "counsellingType": "couples",
+      "isDefault": false,
+      "active": true,
+      "steps": [
+        {
+          "id": "cmlm9de66000zohwxzao3ukv8",
+          "name": "Intake Review",
+          "formType": null,
+          "type": "REVIEW",
+          "required": true,
+          "blocksScheduling": false,
+          "sortOrder": 10
+        },
+        {
+          "id": "cmlm9de5z000pohwxmh4av0t7",
+          "name": "Terms & Conditions Accepted",
+          "formType": "TERMS_AND_CONDITIONS",
+          "type": "FORM",
+          "required": true,
+          "blocksScheduling": true,
+          "sortOrder": 20
+        },
+        {
+          "id": "cmlm9de670011ohwxub7g3fzm",
+          "name": "Engagement Contract Signed",
+          "formType": "CONTRACT",
+          "type": "FORM",
+          "required": true,
+          "blocksScheduling": true,
+          "sortOrder": 30
+        },
+        {
+          "id": "cmlm9de680013ohwxxv0cr8vd",
+          "name": "Couples Preparation Form Complete",
+          "formType": "COUPLES_PREP_FORM",
+          "type": "FORM",
+          "required": true,
+          "blocksScheduling": true,
+          "sortOrder": 35
+        },
+        {
+          "id": "cmlm9de63000vohwx3n9ttmfa",
+          "name": "Session Intake Complete",
+          "formType": "INTAKE_FORM",
+          "type": "FORM",
+          "required": true,
+          "blocksScheduling": false,
+          "sortOrder": 40
+        },
+        {
+          "id": "cmlm9de65000xohwxm2z4ueym",
+          "name": "Outtake Complete",
+          "formType": "OUTTAKE_FORM",
+          "type": "FORM",
+          "required": false,
+          "blocksScheduling": false,
+          "sortOrder": 50
+        }
+      ]
+    },
+    {
+      "id": "cmlm9de59000gohwxx4zbp6l3",
+      "code": "GENERAL_COUNSELLING",
+      "name": "General Counselling",
+      "counsellingType": "general",
+      "isDefault": true,
+      "active": true,
+      "steps": [
+        {
+          "id": "cmlm9de5h000nohwxvh7pu97b",
+          "name": "Intake Review",
+          "formType": null,
+          "type": "REVIEW",
+          "required": true,
+          "blocksScheduling": false,
+          "sortOrder": 10
+        },
+        {
+          "id": "cmlm9de61000tohwx8xalaivv",
+          "name": "Terms & Conditions Accepted",
+          "formType": "TERMS_AND_CONDITIONS",
+          "type": "FORM",
+          "required": true,
+          "blocksScheduling": true,
+          "sortOrder": 20
+        },
+        {
+          "id": "cmlm9de5z000rohwxh0i0qzor",
+          "name": "Engagement Contract Signed",
+          "formType": "CONTRACT",
+          "type": "FORM",
+          "required": true,
+          "blocksScheduling": true,
+          "sortOrder": 30
+        },
+        {
+          "id": "cmlm9de5h000lohwx1ddnvrjm",
+          "name": "Session Intake Complete",
+          "formType": "INTAKE_FORM",
+          "type": "FORM",
+          "required": true,
+          "blocksScheduling": false,
+          "sortOrder": 40
+        },
+        {
+          "id": "cmlm9de5h000mohwxiiqavckm",
+          "name": "Outtake Complete",
+          "formType": "OUTTAKE_FORM",
+          "type": "FORM",
+          "required": false,
+          "blocksScheduling": false,
+          "sortOrder": 50
+        }
+      ]
+    }
+  ],
+  "seededCases": [
+    {
+      "id": "cmlm9de6f0015ohwxvp3oj0kx",
+      "reference": "CASE-1001",
+      "status": "SCHEDULED",
+      "counsellingType": "individual",
+      "workflowTemplate": {
+        "id": "cmlm9de59000gohwxx4zbp6l3",
+        "code": "GENERAL_COUNSELLING",
+        "counsellingType": "general"
+      },
+      "workflowStates": [
+        {
+          "stepName": "Intake Review",
+          "formType": null,
+          "blocksScheduling": false,
+          "status": "PENDING"
+        },
+        {
+          "stepName": "Terms & Conditions Accepted",
+          "formType": "TERMS_AND_CONDITIONS",
+          "blocksScheduling": true,
+          "status": "COMPLETED"
+        },
+        {
+          "stepName": "Engagement Contract Signed",
+          "formType": "CONTRACT",
+          "blocksScheduling": true,
+          "status": "COMPLETED"
+        },
+        {
+          "stepName": "Session Intake Complete",
+          "formType": "INTAKE_FORM",
+          "blocksScheduling": false,
+          "status": "PENDING"
+        },
+        {
+          "stepName": "Outtake Complete",
+          "formType": "OUTTAKE_FORM",
+          "blocksScheduling": false,
+          "status": "PENDING"
+        }
+      ]
+    },
+    {
+      "id": "cmlm9de7q001johwxhpzkmb17",
+      "reference": "CASE-1002",
+      "status": "NEW",
+      "counsellingType": "couples",
+      "workflowTemplate": {
+        "id": "cmlm9de59000hohwxuuqd3zoy",
+        "code": "COUPLES_COUNSELLING",
+        "counsellingType": "couples"
+      },
+      "workflowStates": [
+        {
+          "stepName": "Intake Review",
+          "formType": null,
+          "blocksScheduling": false,
+          "status": "PENDING"
+        },
+        {
+          "stepName": "Terms & Conditions Accepted",
+          "formType": "TERMS_AND_CONDITIONS",
+          "blocksScheduling": true,
+          "status": "PENDING"
+        },
+        {
+          "stepName": "Engagement Contract Signed",
+          "formType": "CONTRACT",
+          "blocksScheduling": true,
+          "status": "PENDING"
+        },
+        {
+          "stepName": "Couples Preparation Form Complete",
+          "formType": "COUPLES_PREP_FORM",
+          "blocksScheduling": true,
+          "status": "PENDING"
+        },
+        {
+          "stepName": "Session Intake Complete",
+          "formType": "INTAKE_FORM",
+          "blocksScheduling": false,
+          "status": "PENDING"
+        },
+        {
+          "stepName": "Outtake Complete",
+          "formType": "OUTTAKE_FORM",
+          "blocksScheduling": false,
+          "status": "PENDING"
+        }
+      ]
+    }
+  ]
+}

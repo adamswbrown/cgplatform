@@ -1,6 +1,11 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { allocateCaseAutomatically, createCaseFromIntake } from "@/lib/case-service";
+import {
+  allocateCaseAutomatically,
+  createCaseFromIntake,
+  ingestAvailabilitySubmission,
+  ingestFormSubmission,
+} from "@/lib/case-service";
 
 const payloadSchema = z
   .object({
@@ -10,6 +15,120 @@ const payloadSchema = z
 
 function buildUniqueEmail(runToken: string, type: "single" | "couple", index: number) {
   return `sim-${runToken}-${type}-${index}@example.local`;
+}
+
+function buildWindow(dayOffset: number, startHourUtc: number, endHourUtc: number) {
+  const now = new Date();
+  const start = new Date(
+    Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), startHourUtc, 0, 0, 0),
+  );
+  start.setUTCDate(start.getUTCDate() + dayOffset);
+
+  while (start.getUTCDay() === 0 || start.getUTCDay() === 6) {
+    start.setUTCDate(start.getUTCDate() + 1);
+  }
+
+  const end = new Date(start);
+  end.setUTCHours(endHourUtc, 0, 0, 0);
+
+  return {
+    startTime: start.toISOString(),
+    endTime: end.toISOString(),
+  };
+}
+
+function buildParticipantAvailabilityWindows(participantType: "single" | "couple", variant: "primary" | "secondary") {
+  if (participantType === "single") {
+    return [buildWindow(2, 9, 12), buildWindow(3, 13, 17)];
+  }
+
+  if (variant === "primary") {
+    return [buildWindow(2, 10, 13), buildWindow(4, 14, 17)];
+  }
+
+  return [buildWindow(2, 11, 14), buildWindow(4, 15, 17)];
+}
+
+async function completeBlockingForms(
+  caseId: string,
+  participants: { primaryEmail: string; secondaryEmail?: string },
+  type: "single" | "couple",
+) {
+  await ingestFormSubmission({
+    caseId,
+    participantIdentifier: participants.primaryEmail,
+    formType: "INTAKE_FORM",
+    source: "dev_simulator",
+    metadata: {
+      simulated: true,
+    },
+  });
+
+  await ingestFormSubmission({
+    caseId,
+    participantIdentifier: participants.primaryEmail,
+    formType: type === "single" ? "TERMS_AND_CONDITIONS" : "AGREEMENT_FORM",
+    source: "dev_simulator",
+    metadata: {
+      simulated: true,
+    },
+  });
+
+  if (type === "couple") {
+    await ingestFormSubmission({
+      caseId,
+      participantIdentifier: participants.secondaryEmail || participants.primaryEmail,
+      formType: "INTAKE_FORM",
+      source: "dev_simulator",
+      metadata: {
+        simulated: true,
+      },
+    });
+
+    await ingestFormSubmission({
+      caseId,
+      participantIdentifier: participants.primaryEmail,
+      formType: "CONSENT_FORM",
+      source: "dev_simulator",
+      metadata: {
+        simulated: true,
+      },
+    });
+
+    await ingestFormSubmission({
+      caseId,
+      participantIdentifier: participants.secondaryEmail || participants.primaryEmail,
+      formType: "CONSENT_FORM",
+      source: "dev_simulator",
+      metadata: {
+        simulated: true,
+      },
+    });
+  }
+
+  await ingestAvailabilitySubmission({
+    caseId,
+    participantIdentifier: participants.primaryEmail,
+    timezone: "UTC",
+    source: "dev_simulator",
+    windows: buildParticipantAvailabilityWindows(type, "primary"),
+    metadata: {
+      simulated: true,
+    },
+  });
+
+  if (type === "couple") {
+    await ingestAvailabilitySubmission({
+      caseId,
+      participantIdentifier: participants.secondaryEmail || participants.primaryEmail,
+      timezone: "UTC",
+      source: "dev_simulator",
+      windows: buildParticipantAvailabilityWindows(type, "secondary"),
+      metadata: {
+        simulated: true,
+      },
+    });
+  }
 }
 
 export async function POST(request: Request) {
@@ -47,6 +166,7 @@ export async function POST(request: Request) {
   for (const duration of durations) {
     index += 1;
     const single = await createCaseFromIntake({
+      counsellingType: "individual",
       primary: {
         firstName: "Sim",
         lastName: `Single${index}`,
@@ -59,6 +179,11 @@ export async function POST(request: Request) {
 
     let singleAllocationError: string | null = null;
     try {
+      await completeBlockingForms(
+        single.caseId,
+        { primaryEmail: buildUniqueEmail(runToken, "single", index) },
+        "single",
+      );
       await allocateCaseAutomatically(single.caseId);
     } catch (error) {
       singleAllocationError = error instanceof Error ? error.message : "Allocation failed";
@@ -73,16 +198,19 @@ export async function POST(request: Request) {
     });
 
     index += 1;
+    const couplePrimaryEmail = buildUniqueEmail(runToken, "couple", index);
+    const coupleSecondaryEmail = buildUniqueEmail(runToken, "couple", index + 1000);
     const couple = await createCaseFromIntake({
+      counsellingType: "couples",
       primary: {
         firstName: "Sim",
         lastName: `CoupleA${index}`,
-        email: buildUniqueEmail(runToken, "couple", index),
+        email: couplePrimaryEmail,
       },
       secondary: {
         firstName: "Sim",
         lastName: `CoupleB${index}`,
-        email: buildUniqueEmail(runToken, "couple", index + 1000),
+        email: coupleSecondaryEmail,
       },
       notes: `Simulated couple booking ${duration}m`,
       requestedDurationMinutes: duration,
@@ -91,6 +219,14 @@ export async function POST(request: Request) {
 
     let coupleAllocationError: string | null = null;
     try {
+      await completeBlockingForms(
+        couple.caseId,
+        {
+          primaryEmail: couplePrimaryEmail,
+          secondaryEmail: coupleSecondaryEmail,
+        },
+        "couple",
+      );
       await allocateCaseAutomatically(couple.caseId);
     } catch (error) {
       coupleAllocationError = error instanceof Error ? error.message : "Allocation failed";

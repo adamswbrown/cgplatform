@@ -6,6 +6,7 @@ import type {
   SchedulingPersistence,
   SchedulingProvider,
 } from "@/lib/scheduling/types";
+import { sendProviderEventWebhook } from "@/lib/scheduling/provider-events-client";
 
 const ACTIVE_SESSION_STATUSES = [SessionStatus.SCHEDULED, SessionStatus.IN_SESSION] as const;
 const SLOT_INCREMENT_MINUTES = 10;
@@ -172,16 +173,10 @@ export class FakeSchedulingProvider implements SchedulingProvider {
   }
 
   async cancelBooking(bookingId: string) {
-    await this.persistence.session.updateMany({
-      where: {
-        providerBookingId: bookingId,
-        status: {
-          in: [...ACTIVE_SESSION_STATUSES],
-        },
-      },
-      data: {
-        status: SessionStatus.CANCELLED,
-      },
+    await sendProviderEventWebhook({
+      provider: "fake",
+      type: "booking.cancelled",
+      bookingId,
     });
   }
 }

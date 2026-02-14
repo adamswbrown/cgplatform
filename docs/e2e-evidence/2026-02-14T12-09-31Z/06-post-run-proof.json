@@ -1,0 +1,129 @@
+{
+  "generatedAt": "2026-02-14T12:12:02.269Z",
+  "summary": {
+    "activeSessionCount": 25,
+    "globalActiveOverlapCount": 0
+  },
+  "durationAssertions": {
+    "singles": {
+      "cases": [
+        {
+          "caseReference": "CASE-1019",
+          "requestedDuration": 30,
+          "actualDuration": 30,
+          "specialistId": "cmlm9xof60007ohto4rgp7pr9",
+          "providerStartTime": "2026-02-16T11:00:00.000Z",
+          "providerEndTime": "2026-02-16T11:30:00.000Z"
+        },
+        {
+          "caseReference": "CASE-1020",
+          "requestedDuration": 60,
+          "actualDuration": 60,
+          "specialistId": "cmlm9xoeh0005ohtoc6ilrnum",
+          "providerStartTime": "2026-02-16T14:00:00.000Z",
+          "providerEndTime": "2026-02-16T15:00:00.000Z"
+        },
+        {
+          "caseReference": "CASE-1021",
+          "requestedDuration": 90,
+          "actualDuration": 90,
+          "specialistId": "cmlm9xof50006ohtof4tal0xx",
+          "providerStartTime": "2026-02-16T14:30:00.000Z",
+          "providerEndTime": "2026-02-16T16:00:00.000Z"
+        }
+      ],
+      "allMatch": true
+    },
+    "couples": {
+      "cases": [
+        {
+          "caseReference": "CASE-1024",
+          "requestedDuration": 30,
+          "actualDuration": 30,
+          "specialistId": "cmlm9xof60007ohto4rgp7pr9",
+          "providerStartTime": "2026-02-16T11:30:00.000Z",
+          "providerEndTime": "2026-02-16T12:00:00.000Z"
+        },
+        {
+          "caseReference": "CASE-1025",
+          "requestedDuration": 60,
+          "actualDuration": 60,
+          "specialistId": "cmlm9xof60007ohto4rgp7pr9",
+          "providerStartTime": "2026-02-16T16:00:00.000Z",
+          "providerEndTime": "2026-02-16T17:00:00.000Z"
+        },
+        {
+          "caseReference": "CASE-1026",
+          "requestedDuration": 90,
+          "actualDuration": 90,
+          "specialistId": "cmlm9xof50006ohtof4tal0xx",
+          "providerStartTime": "2026-02-17T09:00:00.000Z",
+          "providerEndTime": "2026-02-17T10:30:00.000Z"
+        }
+      ],
+      "allMatch": true
+    }
+  },
+  "clashAssertions": {
+    "singlePair": {
+      "caseReferences": [
+        "CASE-1027",
+        "CASE-1028"
+      ],
+      "sameSpecialist": true,
+      "overlaps": false
+    },
+    "couplePair": {
+      "caseReferences": [
+        "CASE-1029",
+        "CASE-1030"
+      ],
+      "sameSpecialist": true,
+      "overlaps": false
+    },
+    "globalActiveOverlapCount": 0
+  },
+  "schedulingGate": {
+    "caseReference": "CASE-1022",
+    "caseStatus": "SCHEDULED",
+    "pendingBlockingStepsAfterCompletion": [],
+    "eligibleAfterCompletion": true
+  },
+  "couplesBothParticipantsGate": {
+    "caseReference": "CASE-1023",
+    "participantCount": 2,
+    "intake": {
+      "status": "COMPLETED",
+      "participantsCompleted": [
+        "workflow-couple-a-1771071061439@example.com",
+        "workflow-couple-b-1771071061439@example.com"
+      ]
+    },
+    "consent": {
+      "status": "COMPLETED",
+      "participantsCompleted": [
+        "workflow-couple-a-1771071061439@example.com",
+        "workflow-couple-b-1771071061439@example.com"
+      ]
+    },
+    "bothParticipantStepsSatisfied": true
+  },
+  "termsTransitionGate": {
+    "single": {
+      "caseReference": "CASE-1031",
+      "status": "MATCHED"
+    },
+    "couple": {
+      "caseReference": "CASE-1032",
+      "status": "MATCHED"
+    },
+    "blockedTransitionVerifiedByE2EAssertions": true
+  },
+  "smokeFlowAssertion": {
+    "caseReference": "CASE-1018",
+    "status": "CLOSED",
+    "sessionStatuses": [
+      "COMPLETED"
+    ]
+  }
+}

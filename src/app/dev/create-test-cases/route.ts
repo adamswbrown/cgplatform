@@ -1,0 +1,128 @@
+import { CaseStatus } from "@prisma/client";
+import { NextResponse } from "next/server";
+import { z } from "zod";
+import {
+  createCaseFromIntake,
+  ingestFormSubmission,
+} from "@/lib/case-service";
+
+const payloadSchema = z
+  .object({
+    countPerType: z.number().int().positive().max(20).optional(),
+  })
+  .strict();
+
+function makeEmail(runToken: string, type: string, index: number) {
+  return `dev-${runToken}-${type}-${index}@example.local`;
+}
+
+export async function POST(request: Request) {
+  if (process.env.NODE_ENV === "production") {
+    return NextResponse.json({ ok: false, error: "Not available in production." }, { status: 404 });
+  }
+
+  let countPerType = 2;
+  try {
+    const text = await request.text();
+    if (text.trim()) {
+      const parsed = payloadSchema.parse(JSON.parse(text));
+      if (parsed.countPerType) {
+        countPerType = parsed.countPerType;
+      }
+    }
+  } catch {
+    return NextResponse.json(
+      { ok: false, error: "Invalid JSON payload." },
+      { status: 400 },
+    );
+  }
+
+  const runToken = new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14);
+  const created: Array<{
+    caseId: string;
+    reference: string;
+    counsellingType: string;
+    completionState: "none" | "partial";
+  }> = [];
+
+  for (let i = 0; i < countPerType; i += 1) {
+    const primaryEmail = makeEmail(runToken, "individual", i);
+    const individual = await createCaseFromIntake({
+      counsellingType: "individual",
+      initialStatus: CaseStatus.AWAITING_REVIEW,
+      autoAllocate: false,
+      primary: {
+        firstName: "Dev",
+        lastName: `Individual${i}`,
+        email: primaryEmail,
+      },
+      notes: "Dev test case for workflow gating.",
+    });
+
+    created.push({
+      caseId: individual.caseId,
+      reference: individual.reference,
+      counsellingType: "individual",
+      completionState: "none",
+    });
+
+    if (i % 2 === 0) {
+      await ingestFormSubmission({
+        caseId: individual.caseId,
+        participantIdentifier: primaryEmail,
+        formType: "INTAKE_FORM",
+        source: "dev_create_test_cases",
+        metadata: { partial: true },
+      });
+      created[created.length - 1].completionState = "partial";
+    }
+  }
+
+  for (let i = 0; i < countPerType; i += 1) {
+    const primaryEmail = makeEmail(runToken, "couple-primary", i);
+    const secondaryEmail = makeEmail(runToken, "couple-secondary", i);
+
+    const couple = await createCaseFromIntake({
+      counsellingType: "couples",
+      initialStatus: CaseStatus.AWAITING_REVIEW,
+      autoAllocate: false,
+      primary: {
+        firstName: "Dev",
+        lastName: `CoupleA${i}`,
+        email: primaryEmail,
+      },
+      secondary: {
+        firstName: "Dev",
+        lastName: `CoupleB${i}`,
+        email: secondaryEmail,
+      },
+      notes: "Dev couple workflow gate case.",
+    });
+
+    created.push({
+      caseId: couple.caseId,
+      reference: couple.reference,
+      counsellingType: "couples",
+      completionState: "none",
+    });
+
+    if (i % 2 === 0) {
+      await ingestFormSubmission({
+        caseId: couple.caseId,
+        participantIdentifier: primaryEmail,
+        formType: "INTAKE_FORM",
+        source: "dev_create_test_cases",
+        metadata: { partial: true },
+      });
+      created[created.length - 1].completionState = "partial";
+    }
+  }
+
+  return NextResponse.json({
+    ok: true,
+    data: {
+      count: created.length,
+      created,
+    },
+  });
+}

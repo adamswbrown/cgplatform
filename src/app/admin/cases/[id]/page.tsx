@@ -3,13 +3,14 @@ import { notFound } from "next/navigation";
 import { UserRole } from "@prisma/client";
 import {
   autoAllocateCaseAction,
+  assignCaseWorkflowAction,
   completeDocumentAction,
   overrideAssignmentAction,
   transitionCaseAction,
 } from "@/app/actions";
 import { AuthenticatedShell } from "@/components/authenticated-shell";
 import { requirePageUser } from "@/lib/auth";
-import { getCaseDetails, listSpecialistsForOps } from "@/lib/case-service";
+import { getCaseDetails, listSpecialistsForOps, listWorkflowTemplatesForOps } from "@/lib/case-service";
 import { formatDateTime, formatStatus } from "@/lib/format";
 import { CASE_TRANSITIONS } from "@/lib/workflow";
 
@@ -22,9 +23,10 @@ export default async function CaseDetailPage({ params, searchParams }: CaseDetai
   const user = await requirePageUser([UserRole.OPS]);
   const { id } = await params;
 
-  const [caseItem, specialists, query] = await Promise.all([
+  const [caseItem, specialists, workflowTemplates, query] = await Promise.all([
     getCaseDetails(id),
     listSpecialistsForOps(),
+    listWorkflowTemplatesForOps(),
     searchParams,
   ]);
 
@@ -46,6 +48,7 @@ export default async function CaseDetailPage({ params, searchParams }: CaseDetai
         { href: "/admin/cases", label: "All Cases" },
         { href: "/admin/clients", label: "All Clients" },
         { href: "/admin/specialists", label: "Specialists" },
+        { href: "/admin/workflows", label: "Workflows" },
         { href: "/intake", label: "Public Intake" },
       ]}
     >
@@ -101,6 +104,10 @@ export default async function CaseDetailPage({ params, searchParams }: CaseDetai
                 Notes & Flags
               </h3>
               <p className="mt-2 text-sm">{caseItem.notes || "No notes"}</p>
+              <p className="mt-2 text-xs text-[color:var(--muted)]">
+                Counselling type: {caseItem.counsellingType || "unspecified"} • Intake source:{" "}
+                {caseItem.intakeSource}
+              </p>
               <div className="mt-2 flex flex-wrap gap-2">
                 {caseItem.flags.length > 0 ? (
                   caseItem.flags.map((flag) => (
@@ -122,7 +129,7 @@ export default async function CaseDetailPage({ params, searchParams }: CaseDetai
             <form action={autoAllocateCaseAction} className="rounded-xl border border-[color:var(--border)] p-4">
               <h3 className="text-sm font-semibold">Automatic allocation</h3>
               <p className="mt-1 text-xs text-[color:var(--muted)]">
-                Runs matching rules, queries scheduling provider availability, and books the earliest returned slot.
+                Runs matching rules, checks workflow blocking steps, filters by submitted participant-availability overlap, queries scheduling provider availability, and books the earliest returned slot.
               </p>
               <input type="hidden" name="caseId" value={caseItem.id} />
               <input type="hidden" name="redirectTo" value={redirectTo} />
@@ -177,9 +184,65 @@ export default async function CaseDetailPage({ params, searchParams }: CaseDetai
 
         <section className="space-y-4 lg:col-span-4">
           <div className="rounded-2xl border border-[color:var(--border)] bg-[color:var(--surface)] p-4 shadow-sm">
+            <h3 className="text-sm font-semibold">Workflow assignment</h3>
+            <p className="mt-1 text-xs text-[color:var(--muted)]">
+              Scheduling is blocked until all required blocking workflow steps are completed.
+            </p>
+
+            <form action={assignCaseWorkflowAction} className="mt-3 space-y-2">
+              <input type="hidden" name="caseId" value={caseItem.id} />
+              <input type="hidden" name="redirectTo" value={redirectTo} />
+              <label htmlFor="caseWorkflowTemplateId" className="block text-xs font-medium">
+                Workflow template
+              </label>
+              <select
+                id="caseWorkflowTemplateId"
+                name="caseWorkflowTemplateId"
+                defaultValue={caseItem.caseWorkflowTemplateId || ""}
+                required
+                className="w-full rounded-md border border-[color:var(--border)] px-2 py-2 text-sm"
+              >
+                <option value="">Select workflow...</option>
+                {workflowTemplates.map((caseWorkflowTemplate) => (
+                  <option key={caseWorkflowTemplate.id} value={caseWorkflowTemplate.id}>
+                    {caseWorkflowTemplate.name} ({caseWorkflowTemplate.counsellingType})
+                    {caseWorkflowTemplate.isDefault ? " [default]" : ""}
+                  </option>
+                ))}
+              </select>
+              <button
+                type="submit"
+                className="w-full rounded-md border border-[color:var(--border)] px-3 py-2 text-xs font-semibold hover:bg-[color:var(--accent-soft)]"
+              >
+                Assign workflow
+              </button>
+            </form>
+
+            <ul className="mt-3 space-y-2 text-xs">
+              {caseItem.workflowStates
+                .slice()
+                .sort((a, b) => a.step.sortOrder - b.step.sortOrder)
+                .map((state) => (
+                  <li key={state.id} className="rounded-md border border-[color:var(--border)] p-2">
+                    <p className="font-medium">{state.step.name}</p>
+                    <p className="text-[color:var(--muted)]">
+                      {state.step.type}
+                      {state.step.formType ? ` • ${state.step.formType}` : ""}
+                      {state.step.blocksScheduling ? " • blocks scheduling" : ""}
+                    </p>
+                    <p className="mt-1">
+                      {state.status === "COMPLETED" ? "Completed" : "Pending"}
+                    </p>
+                  </li>
+                ))}
+            </ul>
+          </div>
+
+          <div className="rounded-2xl border border-[color:var(--border)] bg-[color:var(--surface)] p-4 shadow-sm">
             <h3 className="text-sm font-semibold">Manual override assignment</h3>
             <p className="mt-1 text-xs text-[color:var(--muted)]">
-              Ops can override specialist. The system always books the earliest provider slot for the selected specialist.
+              Ops can override specialist. Scheduling still requires all blocking workflow steps to
+              be completed.
             </p>
 
             <form action={overrideAssignmentAction} className="mt-3 space-y-2">

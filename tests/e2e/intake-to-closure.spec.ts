@@ -16,6 +16,35 @@ function overlaps(firstStart: string, firstEnd: string, secondStart: string, sec
   return new Date(firstStart) < new Date(secondEnd) && new Date(secondStart) < new Date(firstEnd);
 }
 
+function buildAvailabilityWindow(dayOffset: number, startHourUtc: number, endHourUtc: number) {
+  const now = new Date();
+  const start = new Date(
+    Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), startHourUtc, 0, 0, 0),
+  );
+  start.setUTCDate(start.getUTCDate() + dayOffset);
+
+  while (start.getUTCDay() === 0 || start.getUTCDay() === 6) {
+    start.setUTCDate(start.getUTCDate() + 1);
+  }
+
+  const end = new Date(start);
+  end.setUTCHours(endHourUtc, 0, 0, 0);
+
+  return {
+    startTime: start.toISOString(),
+    endTime: end.toISOString(),
+  };
+}
+
+function availabilityShiftSeed(seed: string) {
+  let total = 0;
+  for (const character of seed) {
+    total += character.charCodeAt(0);
+  }
+
+  return total % 5;
+}
+
 async function expectCurrentStatus(page: Page, status: string) {
   await expect(page.getByTestId("case-current-status")).toHaveText(statusLabel(status));
 }
@@ -64,6 +93,7 @@ async function createCaseViaApi(
   payload: {
     primary: { firstName: string; lastName: string; email: string; phone?: string };
     secondary?: { firstName: string; lastName: string; email: string; phone?: string };
+    counsellingType?: string;
     notes?: string;
     requestedDurationMinutes?: number;
     autoAllocate?: boolean;
@@ -113,14 +143,176 @@ async function allocateCaseViaApi(page: Page, caseId: string) {
     data: {
       sessions: Array<{
         specialistId: string;
+        providerBookingId: string;
         providerStartTime: string;
         providerEndTime: string;
+        status: string;
       }>;
     };
   };
 
   expect(json.ok).toBe(true);
   return json.data;
+}
+
+async function allocateCaseViaApiExpectError(page: Page, caseId: string) {
+  const response = await postJsonFromBrowser(page, `/api/cases/${caseId}/allocate`);
+  expect(response.ok).toBe(false);
+  return response;
+}
+
+async function submitFormForCase(
+  page: Page,
+  payload: {
+    formType: string;
+    caseId: string;
+    participantIdentifier: string;
+    source?: string;
+    metadata?: Record<string, unknown>;
+  },
+) {
+  const response = await postJsonFromBrowser(page, "/forms/submission", payload);
+  expect(response.ok).toBeTruthy();
+
+  const json = response.json as {
+    ok: boolean;
+    data: {
+      eligibleForScheduling: boolean;
+    };
+  };
+
+  expect(json.ok).toBe(true);
+  return json.data;
+}
+
+async function submitAvailabilityForCase(
+  page: Page,
+  payload: {
+    caseId: string;
+    participantIdentifier: string;
+    windows: Array<{ startTime: string; endTime: string }>;
+    timezone?: string;
+  },
+) {
+  const response = await postJsonFromBrowser(page, "/availability/submission", {
+    ...payload,
+    source: "playwright",
+  });
+  expect(response.ok).toBeTruthy();
+
+  const json = response.json as {
+    ok: boolean;
+    data: {
+      eligibleForScheduling: boolean;
+      hasOverlap: boolean;
+      participantsSubmitted: number;
+      requiredParticipants: number;
+    };
+  };
+  expect(json.ok).toBe(true);
+  return json.data;
+}
+
+function defaultAvailabilityWindows(
+  participantType: "single" | "couple",
+  variant: "primary" | "secondary",
+  seed: string,
+) {
+  const shift = availabilityShiftSeed(seed);
+
+  if (participantType === "single") {
+    return [buildAvailabilityWindow(2 + shift, 9, 12), buildAvailabilityWindow(3 + shift, 13, 17)];
+  }
+
+  if (variant === "primary") {
+    return [buildAvailabilityWindow(2 + shift, 10, 13), buildAvailabilityWindow(4 + shift, 14, 17)];
+  }
+
+  return [buildAvailabilityWindow(2 + shift, 11, 14), buildAvailabilityWindow(4 + shift, 15, 17)];
+}
+
+function nonOverlappingCoupleWindows(variant: "primary" | "secondary") {
+  if (variant === "primary") {
+    return [buildAvailabilityWindow(2, 9, 10), buildAvailabilityWindow(3, 9, 10)];
+  }
+
+  return [buildAvailabilityWindow(2, 15, 16), buildAvailabilityWindow(3, 15, 16)];
+}
+
+async function completeRequiredFormsForCase(
+  page: Page,
+  caseId: string,
+  participants: {
+    primaryIdentifier: string;
+    secondaryIdentifier?: string;
+  },
+  participantType: "single" | "couple",
+) {
+  await submitFormForCase(page, {
+    caseId,
+    participantIdentifier: participants.primaryIdentifier,
+    formType: "INTAKE_FORM",
+    source: "playwright",
+  });
+
+  if (participantType === "couple") {
+    await submitFormForCase(page, {
+      caseId,
+      participantIdentifier: participants.secondaryIdentifier || participants.primaryIdentifier,
+      formType: "INTAKE_FORM",
+      source: "playwright",
+    });
+  }
+
+  await submitFormForCase(page, {
+    caseId,
+    participantIdentifier: participants.primaryIdentifier,
+    formType: participantType === "single" ? "TERMS_AND_CONDITIONS" : "AGREEMENT_FORM",
+    source: "playwright",
+  });
+
+  if (participantType === "couple") {
+    await submitFormForCase(page, {
+      caseId,
+      participantIdentifier: participants.primaryIdentifier,
+      formType: "CONSENT_FORM",
+      source: "playwright",
+    });
+    await submitFormForCase(page, {
+      caseId,
+      participantIdentifier: participants.secondaryIdentifier || participants.primaryIdentifier,
+      formType: "CONSENT_FORM",
+      source: "playwright",
+    });
+  }
+}
+
+async function completeBlockingFormsForCase(
+  page: Page,
+  caseId: string,
+  participants: {
+    primaryIdentifier: string;
+    secondaryIdentifier?: string;
+  },
+  participantType: "single" | "couple",
+) {
+  await completeRequiredFormsForCase(page, caseId, participants, participantType);
+
+  await submitAvailabilityForCase(page, {
+    caseId,
+    participantIdentifier: participants.primaryIdentifier,
+    windows: defaultAvailabilityWindows(participantType, "primary", caseId),
+    timezone: "UTC",
+  });
+
+  if (participantType === "couple") {
+    await submitAvailabilityForCase(page, {
+      caseId,
+      participantIdentifier: participants.secondaryIdentifier || participants.primaryIdentifier,
+      windows: defaultAvailabilityWindows(participantType, "secondary", caseId),
+      timezone: "UTC",
+    });
+  }
 }
 
 async function overrideCaseViaApi(page: Page, caseId: string, specialistId: string) {
@@ -135,8 +327,10 @@ async function overrideCaseViaApi(page: Page, caseId: string, specialistId: stri
     data: {
       sessions: Array<{
         specialistId: string;
+        providerBookingId: string;
         providerStartTime: string;
         providerEndTime: string;
+        status: string;
       }>;
     };
   };
@@ -150,9 +344,10 @@ test("intake to closed case smoke flow", async ({ page }) => {
 
   await page.goto("/intake");
 
+  const primaryEmail = `smoke-${unique}@example.com`;
   await page.fill('input[name="primaryFirstName"]', "Smoke");
   await page.fill('input[name="primaryLastName"]', `Test${unique}`);
-  await page.fill('input[name="primaryEmail"]', `smoke-${unique}@example.com`);
+  await page.fill('input[name="primaryEmail"]', primaryEmail);
   await page.fill('textarea[name="notes"]', "Playwright smoke flow");
 
   await Promise.all([
@@ -174,6 +369,17 @@ test("intake to closed case smoke flow", async ({ page }) => {
   await page.goto(`/admin/cases/${caseId}`);
 
   await expect(page.getByRole("heading", { name: /Case CASE-/ })).toBeVisible();
+  await expectCurrentStatus(page, "AWAITING_REVIEW");
+
+  await completeBlockingFormsForCase(
+    page,
+    caseId,
+    { primaryIdentifier: primaryEmail },
+    "single",
+  );
+  await transitionTo(page, "MATCHED");
+  await allocateCaseViaApi(page, caseId);
+  await page.goto(`/admin/cases/${caseId}`);
   await expectCurrentStatus(page, "SCHEDULED");
 
   await completeAllPendingDocuments(page);
@@ -244,17 +450,24 @@ test("one-to-one bookings support 30, 60, 90 minute durations", async ({ page })
 
   for (const duration of [30, 60, 90]) {
     const unique = `${duration}-${Date.now()}`;
+    const primaryEmail = `duration-single-${unique}@example.com`;
     const created = await createCaseViaApi(page, {
       primary: {
         firstName: "Duration",
         lastName: `Single${duration}`,
-        email: `duration-single-${unique}@example.com`,
+        email: primaryEmail,
       },
       notes: `single duration ${duration}`,
       requestedDurationMinutes: duration,
       autoAllocate: false,
     });
 
+    await completeBlockingFormsForCase(
+      page,
+      created.caseId,
+      { primaryIdentifier: primaryEmail },
+      "single",
+    );
     const allocated = await allocateCaseViaApi(page, created.caseId);
     const session = allocated.sessions[0];
     expect(session).toBeTruthy();
@@ -262,27 +475,209 @@ test("one-to-one bookings support 30, 60, 90 minute durations", async ({ page })
   }
 });
 
+test("scheduling stays blocked until blocking workflow form steps are completed", async ({ page }) => {
+  await loginAsOps(page);
+
+  const primaryEmail = `workflow-gate-${Date.now()}@example.com`;
+  const created = await createCaseViaApi(page, {
+    counsellingType: "individual",
+    primary: {
+      firstName: "Workflow",
+      lastName: "GateSingle",
+      email: primaryEmail,
+    },
+    requestedDurationMinutes: 60,
+    autoAllocate: false,
+  });
+
+  const blocked = await allocateCaseViaApiExpectError(page, created.caseId);
+  expect(blocked.status).toBe(409);
+  expect((blocked.json as { error: string }).error).toContain("Case not eligible for scheduling");
+
+  await completeBlockingFormsForCase(
+    page,
+    created.caseId,
+    { primaryIdentifier: primaryEmail },
+    "single",
+  );
+
+  const allocated = await allocateCaseViaApi(page, created.caseId);
+  expect(allocated.sessions[0]).toBeTruthy();
+});
+
+test("couples workflow requires both participants before scheduling is eligible", async ({ page }) => {
+  await loginAsOps(page);
+
+  const unique = Date.now();
+  const primaryEmail = `workflow-couple-a-${unique}@example.com`;
+  const secondaryEmail = `workflow-couple-b-${unique}@example.com`;
+  const created = await createCaseViaApi(page, {
+    counsellingType: "couples",
+    primary: {
+      firstName: "Workflow",
+      lastName: "CoupleGateA",
+      email: primaryEmail,
+    },
+    secondary: {
+      firstName: "Workflow",
+      lastName: "CoupleGateB",
+      email: secondaryEmail,
+    },
+    autoAllocate: false,
+  });
+
+  let blocked = await allocateCaseViaApiExpectError(page, created.caseId);
+  expect(blocked.status).toBe(409);
+
+  const intakePrimary = await submitFormForCase(page, {
+    caseId: created.caseId,
+    participantIdentifier: primaryEmail,
+    formType: "INTAKE_FORM",
+    source: "playwright",
+  });
+  expect(intakePrimary.eligibleForScheduling).toBe(false);
+
+  blocked = await allocateCaseViaApiExpectError(page, created.caseId);
+  expect(blocked.status).toBe(409);
+
+  const intakeSecondary = await submitFormForCase(page, {
+    caseId: created.caseId,
+    participantIdentifier: secondaryEmail,
+    formType: "INTAKE_FORM",
+    source: "playwright",
+  });
+  expect(intakeSecondary.eligibleForScheduling).toBe(false);
+
+  const agreement = await submitFormForCase(page, {
+    caseId: created.caseId,
+    participantIdentifier: primaryEmail,
+    formType: "AGREEMENT_FORM",
+    source: "playwright",
+  });
+  expect(agreement.eligibleForScheduling).toBe(false);
+
+  const consentPrimary = await submitFormForCase(page, {
+    caseId: created.caseId,
+    participantIdentifier: primaryEmail,
+    formType: "CONSENT_FORM",
+    source: "playwright",
+  });
+  expect(consentPrimary.eligibleForScheduling).toBe(false);
+
+  const consentSecondary = await submitFormForCase(page, {
+    caseId: created.caseId,
+    participantIdentifier: secondaryEmail,
+    formType: "CONSENT_FORM",
+    source: "playwright",
+  });
+  expect(consentSecondary.eligibleForScheduling).toBe(false);
+
+  const availabilityPrimary = await submitAvailabilityForCase(page, {
+    caseId: created.caseId,
+    participantIdentifier: primaryEmail,
+    windows: defaultAvailabilityWindows("couple", "primary", created.caseId),
+    timezone: "UTC",
+  });
+  expect(availabilityPrimary.eligibleForScheduling).toBe(false);
+
+  const availabilitySecondary = await submitAvailabilityForCase(page, {
+    caseId: created.caseId,
+    participantIdentifier: secondaryEmail,
+    windows: defaultAvailabilityWindows("couple", "secondary", created.caseId),
+    timezone: "UTC",
+  });
+  expect(availabilitySecondary.eligibleForScheduling).toBe(true);
+
+  const allocated = await allocateCaseViaApi(page, created.caseId);
+  expect(allocated.sessions[0]).toBeTruthy();
+});
+
+test("couples scheduling stays blocked when submissions do not overlap", async ({ page }) => {
+  await loginAsOps(page);
+
+  const unique = Date.now();
+  const primaryEmail = `workflow-no-overlap-a-${unique}@example.com`;
+  const secondaryEmail = `workflow-no-overlap-b-${unique}@example.com`;
+  const created = await createCaseViaApi(page, {
+    counsellingType: "couples",
+    primary: {
+      firstName: "NoOverlap",
+      lastName: "Primary",
+      email: primaryEmail,
+    },
+    secondary: {
+      firstName: "NoOverlap",
+      lastName: "Secondary",
+      email: secondaryEmail,
+    },
+    requestedDurationMinutes: 60,
+    autoAllocate: false,
+  });
+
+  await completeRequiredFormsForCase(
+    page,
+    created.caseId,
+    {
+      primaryIdentifier: primaryEmail,
+      secondaryIdentifier: secondaryEmail,
+    },
+    "couple",
+  );
+
+  const firstSubmission = await submitAvailabilityForCase(page, {
+    caseId: created.caseId,
+    participantIdentifier: primaryEmail,
+    windows: nonOverlappingCoupleWindows("primary"),
+    timezone: "UTC",
+  });
+  expect(firstSubmission.eligibleForScheduling).toBe(false);
+
+  const secondSubmission = await submitAvailabilityForCase(page, {
+    caseId: created.caseId,
+    participantIdentifier: secondaryEmail,
+    windows: nonOverlappingCoupleWindows("secondary"),
+    timezone: "UTC",
+  });
+  expect(secondSubmission.hasOverlap).toBe(false);
+  expect(secondSubmission.eligibleForScheduling).toBe(false);
+
+  const blocked = await allocateCaseViaApiExpectError(page, created.caseId);
+  expect(blocked.status).toBe(409);
+  expect((blocked.json as { error: string }).error).toContain("Case not eligible for scheduling");
+});
+
 test("many-to-one bookings support 30, 60, 90 minute durations", async ({ page }) => {
   await loginAsOps(page);
 
   for (const duration of [30, 60, 90]) {
     const unique = `${duration}-${Date.now()}`;
+    const primaryEmail = `duration-couple-a-${unique}@example.com`;
+    const secondaryEmail = `duration-couple-b-${unique}@example.com`;
     const created = await createCaseViaApi(page, {
       primary: {
         firstName: "Duration",
         lastName: `CoupleA${duration}`,
-        email: `duration-couple-a-${unique}@example.com`,
+        email: primaryEmail,
       },
       secondary: {
         firstName: "Duration",
         lastName: `CoupleB${duration}`,
-        email: `duration-couple-b-${unique}@example.com`,
+        email: secondaryEmail,
       },
       notes: `couple duration ${duration}`,
       requestedDurationMinutes: duration,
       autoAllocate: false,
     });
 
+    await completeBlockingFormsForCase(
+      page,
+      created.caseId,
+      {
+        primaryIdentifier: primaryEmail,
+        secondaryIdentifier: secondaryEmail,
+      },
+      "couple",
+    );
     const allocated = await allocateCaseViaApi(page, created.caseId);
     const session = allocated.sessions[0];
     expect(session).toBeTruthy();
@@ -293,29 +688,43 @@ test("many-to-one bookings support 30, 60, 90 minute durations", async ({ page }
 test("provider prevents booking clashes for one-to-one and many-to-one bookings", async ({ page }) => {
   await loginAsOps(page);
 
+  const singleOneEmail = `clash-single-one-${Date.now()}@example.com`;
   const singleOne = await createCaseViaApi(page, {
     primary: {
       firstName: "Clash",
       lastName: "SingleOne",
-      email: `clash-single-one-${Date.now()}@example.com`,
+      email: singleOneEmail,
     },
     requestedDurationMinutes: 60,
     autoAllocate: false,
   });
 
+  await completeBlockingFormsForCase(
+    page,
+    singleOne.caseId,
+    { primaryIdentifier: singleOneEmail },
+    "single",
+  );
   const singleOneAllocated = await allocateCaseViaApi(page, singleOne.caseId);
   const singleOneSession = singleOneAllocated.sessions[0];
 
+  const singleTwoEmail = `clash-single-two-${Date.now()}@example.com`;
   const singleTwo = await createCaseViaApi(page, {
     primary: {
       firstName: "Clash",
       lastName: "SingleTwo",
-      email: `clash-single-two-${Date.now()}@example.com`,
+      email: singleTwoEmail,
     },
     requestedDurationMinutes: 60,
     autoAllocate: false,
   });
 
+  await completeBlockingFormsForCase(
+    page,
+    singleTwo.caseId,
+    { primaryIdentifier: singleTwoEmail },
+    "single",
+  );
   const singleTwoAllocated = await overrideCaseViaApi(
     page,
     singleTwo.caseId,
@@ -332,39 +741,61 @@ test("provider prevents booking clashes for one-to-one and many-to-one bookings"
     ),
   ).toBe(false);
 
+  const coupleOneEmailA = `clash-couple-one-a-${Date.now()}@example.com`;
+  const coupleOneEmailB = `clash-couple-one-b-${Date.now()}@example.com`;
   const coupleOne = await createCaseViaApi(page, {
     primary: {
       firstName: "Clash",
       lastName: "CoupleOneA",
-      email: `clash-couple-one-a-${Date.now()}@example.com`,
+      email: coupleOneEmailA,
     },
     secondary: {
       firstName: "Clash",
       lastName: "CoupleOneB",
-      email: `clash-couple-one-b-${Date.now()}@example.com`,
+      email: coupleOneEmailB,
     },
     requestedDurationMinutes: 90,
     autoAllocate: false,
   });
 
+  await completeBlockingFormsForCase(
+    page,
+    coupleOne.caseId,
+    {
+      primaryIdentifier: coupleOneEmailA,
+      secondaryIdentifier: coupleOneEmailB,
+    },
+    "couple",
+  );
   const coupleOneAllocated = await allocateCaseViaApi(page, coupleOne.caseId);
   const coupleOneSession = coupleOneAllocated.sessions[0];
 
+  const coupleTwoEmailA = `clash-couple-two-a-${Date.now()}@example.com`;
+  const coupleTwoEmailB = `clash-couple-two-b-${Date.now()}@example.com`;
   const coupleTwo = await createCaseViaApi(page, {
     primary: {
       firstName: "Clash",
       lastName: "CoupleTwoA",
-      email: `clash-couple-two-a-${Date.now()}@example.com`,
+      email: coupleTwoEmailA,
     },
     secondary: {
       firstName: "Clash",
       lastName: "CoupleTwoB",
-      email: `clash-couple-two-b-${Date.now()}@example.com`,
+      email: coupleTwoEmailB,
     },
     requestedDurationMinutes: 90,
     autoAllocate: false,
   });
 
+  await completeBlockingFormsForCase(
+    page,
+    coupleTwo.caseId,
+    {
+      primaryIdentifier: coupleTwoEmailA,
+      secondaryIdentifier: coupleTwoEmailB,
+    },
+    "couple",
+  );
   const coupleTwoAllocated = await overrideCaseViaApi(
     page,
     coupleTwo.caseId,
@@ -380,6 +811,62 @@ test("provider prevents booking clashes for one-to-one and many-to-one bookings"
       coupleTwoSession.providerEndTime,
     ),
   ).toBe(false);
+});
+
+test("external provider cancellation moves case back to ready-to-schedule and writes audit log", async ({
+  page,
+}) => {
+  await loginAsOps(page);
+
+  const primaryEmail = `provider-cancel-${Date.now()}@example.com`;
+  const created = await createCaseViaApi(page, {
+    counsellingType: "individual",
+    primary: {
+      firstName: "Provider",
+      lastName: "CancelFlow",
+      email: primaryEmail,
+    },
+    requestedDurationMinutes: 60,
+    autoAllocate: false,
+  });
+
+  await completeBlockingFormsForCase(
+    page,
+    created.caseId,
+    { primaryIdentifier: primaryEmail },
+    "single",
+  );
+  const allocated = await allocateCaseViaApi(page, created.caseId);
+  const booking = allocated.sessions[0];
+  expect(booking.providerBookingId).toBeTruthy();
+
+  await page.goto(`/admin/cases/${created.caseId}`);
+  await expectCurrentStatus(page, "SCHEDULED");
+
+  const cancellation = await postJsonFromBrowser(
+    page,
+    `/dev/provider/cancel/${encodeURIComponent(booking.providerBookingId)}`,
+  );
+  expect(cancellation.ok).toBe(true);
+
+  const cancellationJson = cancellation.json as {
+    ok: boolean;
+    data: {
+      found: boolean;
+      applied: boolean;
+      caseStatus: string;
+      sessionStatus: string;
+    };
+  };
+  expect(cancellationJson.ok).toBe(true);
+  expect(cancellationJson.data.found).toBe(true);
+  expect(cancellationJson.data.caseStatus).toBe("READY_TO_SCHEDULE");
+  expect(cancellationJson.data.sessionStatus).toBe("CANCELLED");
+
+  await page.goto(`/admin/cases/${created.caseId}`);
+  await expectCurrentStatus(page, "READY_TO_SCHEDULE");
+  await expect(page.getByText("PROVIDER_BOOKING_CANCELLED")).toBeVisible();
+  await expect(page.getByText("PROVIDER_CANCELLED")).toBeVisible();
 });
 
 test("terms and conditions must be completed before ready-to-schedule transition", async ({ page }) => {

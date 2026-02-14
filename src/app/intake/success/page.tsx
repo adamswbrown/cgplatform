@@ -30,11 +30,12 @@ export default async function IntakeSuccessPage({ searchParams }: IntakeSuccessP
 
             {allocationMessage ? (
               <p className="mt-4 rounded-2xl border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900">
-                Automatic allocation was attempted but could not complete: {allocationMessage}
+                Scheduling is still blocked: {allocationMessage}
               </p>
             ) : (
               <p className="mt-4 rounded-2xl border border-emerald-300 bg-emerald-50 px-3 py-2 text-sm text-emerald-900">
-                Specialist assignment and calendar scheduling were applied automatically.
+                The case is in pending review. Once required workflow forms are completed, ops can
+                match and schedule.
               </p>
             )}
 

@@ -1,0 +1,5 @@
+Seed completed.
+Login credentials:
+  OPS: ops@demo.local / password123
+  Specialist: avery.specialist@demo.local / password123
+  Specialist: jordan.specialist@demo.local / password123

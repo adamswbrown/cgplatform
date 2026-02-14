@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { CaseStatus } from "@prisma/client";
 import { z } from "zod";
 import { createCaseFromIntake, domainErrorMessage, isDomainError } from "@/lib/case-service";
 
@@ -19,6 +20,11 @@ const intakeApiSchema = z
       })
       .optional(),
     notes: z.string().optional(),
+    counsellingType: z.string().optional(),
+    workflowCode: z.string().optional(),
+    intakeSource: z.string().optional(),
+    intakeExternalId: z.string().optional(),
+    initialStatus: z.nativeEnum(CaseStatus).optional(),
     requestedDurationMinutes: z.number().int().positive().optional(),
     autoAllocate: z.boolean().optional(),
   })

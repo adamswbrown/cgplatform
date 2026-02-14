@@ -17,11 +17,22 @@ import {
 
 export class DomainError extends Error {
   statusCode: number;
+  auditAction?: string;
+  auditDetails?: AuditDetails;
 
-  constructor(message: string, statusCode = 400) {
+  constructor(
+    message: string,
+    statusCode = 400,
+    options?: {
+      auditAction?: string;
+      auditDetails?: AuditDetails;
+    },
+  ) {
     super(message);
     this.name = "DomainError";
     this.statusCode = statusCode;
+    this.auditAction = options?.auditAction;
+    this.auditDetails = options?.auditDetails;
   }
 }
 
@@ -41,8 +52,15 @@ type CaseWithParticipantContacts = Prisma.CaseGetPayload<{
         client: true;
       };
     };
+    availabilityWindows: true;
   };
 }>;
+
+type WorkflowSummary = {
+  id: string;
+  code: string;
+  name: string;
+};
 
 export type IntakeParticipantInput = {
   firstName: string;
@@ -55,11 +73,36 @@ export type IntakeSubmissionInput = {
   primary: IntakeParticipantInput;
   secondary?: IntakeParticipantInput;
   notes?: string;
+  counsellingType?: string;
+  workflowCode?: string;
+  intakeSource?: string;
+  intakeExternalId?: string;
+  initialStatus?: CaseStatus;
   requestedDurationMinutes?: number;
   autoAllocate?: boolean;
 };
 
 const ACTIVE_SESSION_STATUSES = [SessionStatus.SCHEDULED, SessionStatus.IN_SESSION];
+const AVAILABILITY_SUBMISSION_FORM_TYPE = "AVAILABILITY_SUBMISSION";
+
+type AvailabilityRange = {
+  startTime: Date;
+  endTime: Date;
+};
+
+type AvailabilityWindowInput = {
+  startTime: Date | string;
+  endTime: Date | string;
+};
+
+type CaseAvailabilityComputation = {
+  windows: AvailabilityRange[];
+  participantsSubmitted: number;
+  requiredParticipants: number;
+  participantIdentifiersSubmitted: string[];
+  hasOverlap: boolean;
+  reason: string | null;
+};
 
 async function createAuditLog(
   tx: Tx,
@@ -100,6 +143,359 @@ async function nextCaseReference(tx: Tx) {
   return `CASE-${Date.now()}`;
 }
 
+function normalizeCounsellingType(input: string | undefined, participantCount: number) {
+  const normalized = input?.trim().toLowerCase();
+  if (normalized) {
+    return normalized;
+  }
+
+  return participantCount === 2 ? "couples" : "individual";
+}
+
+async function resolveWorkflowForCase(
+  tx: Tx,
+  input: {
+    workflowCode?: string;
+    counsellingType?: string;
+    participantCount: number;
+  },
+) {
+  const explicitCode = input.workflowCode?.trim().toUpperCase();
+  if (explicitCode) {
+    const workflow = await tx.caseWorkflowTemplate.findFirst({
+      where: {
+        code: explicitCode,
+        active: true,
+      },
+      select: {
+        id: true,
+        code: true,
+        name: true,
+      },
+    });
+
+    if (!workflow) {
+      throw new DomainError(`Workflow '${explicitCode}' was not found or is not active.`, 409);
+    }
+
+    return workflow as WorkflowSummary;
+  }
+
+  const counsellingType = normalizeCounsellingType(
+    input.counsellingType,
+    input.participantCount,
+  );
+  if (counsellingType.includes("couple")) {
+    const couples = await tx.caseWorkflowTemplate.findFirst({
+      where: {
+        counsellingType: "couples",
+        active: true,
+      },
+      select: {
+        id: true,
+        code: true,
+        name: true,
+      },
+    });
+
+    if (couples) {
+      return couples as WorkflowSummary;
+    }
+  }
+
+  const typeMatched = await tx.caseWorkflowTemplate.findFirst({
+    where: {
+      counsellingType,
+      active: true,
+    },
+    select: {
+      id: true,
+      code: true,
+      name: true,
+    },
+    orderBy: {
+      createdAt: "asc",
+    },
+  });
+
+  if (typeMatched) {
+    return typeMatched as WorkflowSummary;
+  }
+
+  const defaultWorkflow = await tx.caseWorkflowTemplate.findFirst({
+    where: {
+      active: true,
+      isDefault: true,
+    },
+    select: {
+      id: true,
+      code: true,
+      name: true,
+    },
+    orderBy: {
+      createdAt: "asc",
+    },
+  });
+
+  if (defaultWorkflow) {
+    return defaultWorkflow as WorkflowSummary;
+  }
+
+  const fallbackActive = await tx.caseWorkflowTemplate.findFirst({
+    where: {
+      active: true,
+    },
+    select: {
+      id: true,
+      code: true,
+      name: true,
+    },
+    orderBy: {
+      createdAt: "asc",
+    },
+  });
+
+  if (!fallbackActive) {
+    throw new DomainError(
+      "No active counselling workflow is configured. Configure one before creating cases.",
+      409,
+    );
+  }
+
+  return fallbackActive as WorkflowSummary;
+}
+
+function stepRequiresAllParticipants(stepName: string) {
+  return stepName.toLowerCase().includes("both participants");
+}
+
+function normalizeParticipantIdentifier(identifier: string) {
+  return identifier.trim().toLowerCase();
+}
+
+function normalizePhoneForMatch(value: string | null | undefined) {
+  if (!value) {
+    return null;
+  }
+
+  const normalized = value.replace(/[^\d+]/g, "");
+  return normalized.length > 0 ? normalized : null;
+}
+
+function addMinutes(value: Date, minutes: number) {
+  return new Date(value.getTime() + minutes * 60_000);
+}
+
+function parseAvailabilityDate(value: Date | string, fieldLabel: string) {
+  const dateValue = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(dateValue.getTime())) {
+    throw new DomainError(`Invalid ${fieldLabel} supplied for availability window.`, 400);
+  }
+
+  return dateValue;
+}
+
+function normalizeAvailabilityRanges(windows: AvailabilityWindowInput[]) {
+  if (windows.length === 0) {
+    throw new DomainError("At least one availability window is required.", 400);
+  }
+
+  const sorted = windows
+    .map((window, index) => {
+      const startTime = parseAvailabilityDate(window.startTime, `windows[${index}].startTime`);
+      const endTime = parseAvailabilityDate(window.endTime, `windows[${index}].endTime`);
+
+      if (endTime <= startTime) {
+        throw new DomainError(
+          `Availability window ${index + 1} must end after it starts.`,
+          400,
+        );
+      }
+
+      return {
+        startTime,
+        endTime,
+      };
+    })
+    .sort((a, b) => a.startTime.getTime() - b.startTime.getTime());
+
+  const merged: AvailabilityRange[] = [];
+  for (const range of sorted) {
+    const previous = merged[merged.length - 1];
+    if (!previous) {
+      merged.push(range);
+      continue;
+    }
+
+    if (range.startTime <= previous.endTime) {
+      previous.endTime = new Date(Math.max(previous.endTime.getTime(), range.endTime.getTime()));
+      continue;
+    }
+
+    merged.push(range);
+  }
+
+  return merged;
+}
+
+function intersectAvailabilityRanges(first: AvailabilityRange[], second: AvailabilityRange[]) {
+  const intersections: AvailabilityRange[] = [];
+  let firstIndex = 0;
+  let secondIndex = 0;
+
+  while (firstIndex < first.length && secondIndex < second.length) {
+    const firstRange = first[firstIndex];
+    const secondRange = second[secondIndex];
+
+    const startTime = new Date(
+      Math.max(firstRange.startTime.getTime(), secondRange.startTime.getTime()),
+    );
+    const endTime = new Date(Math.min(firstRange.endTime.getTime(), secondRange.endTime.getTime()));
+
+    if (startTime < endTime) {
+      intersections.push({ startTime, endTime });
+    }
+
+    if (firstRange.endTime <= secondRange.endTime) {
+      firstIndex += 1;
+    } else {
+      secondIndex += 1;
+    }
+  }
+
+  return intersections;
+}
+
+function rangeCanFitDuration(range: AvailabilityRange, durationMinutes: number) {
+  return range.endTime.getTime() - range.startTime.getTime() >= durationMinutes * 60_000;
+}
+
+function slotFitsAvailability(
+  slot: Date,
+  durationMinutes: number,
+  windows: AvailabilityRange[],
+) {
+  const endTime = addMinutes(slot, durationMinutes);
+  return windows.some((window) => slot >= window.startTime && endTime <= window.endTime);
+}
+
+function findParticipantByIdentifier(
+  caseRecord: Pick<CaseWithParticipantContacts, "participants">,
+  participantIdentifier: string,
+) {
+  const trimmedIdentifier = participantIdentifier.trim();
+  const normalizedIdentifier = normalizeParticipantIdentifier(trimmedIdentifier);
+  const normalizedPhone = normalizePhoneForMatch(trimmedIdentifier);
+
+  return caseRecord.participants.find((participant) => {
+    if (participant.client.id === trimmedIdentifier) {
+      return true;
+    }
+
+    const participantEmail = normalizeParticipantIdentifier(participant.client.email);
+    if (participantEmail === normalizedIdentifier) {
+      return true;
+    }
+
+    const participantPhone = normalizePhoneForMatch(participant.client.phone);
+    return Boolean(participantPhone && normalizedPhone && participantPhone === normalizedPhone);
+  });
+}
+
+function computeCaseAvailability(
+  caseRecord: Pick<CaseWithParticipantContacts, "participants" | "availabilityWindows">,
+  durationMinutes: number,
+): CaseAvailabilityComputation {
+  const requiredParticipants = caseRecord.participants.length;
+  if (requiredParticipants === 0) {
+    return {
+      windows: [],
+      participantsSubmitted: 0,
+      requiredParticipants: 0,
+      participantIdentifiersSubmitted: [],
+      hasOverlap: false,
+      reason: "Case has no participants.",
+    };
+  }
+
+  const windowsByParticipant = new Map<string, AvailabilityRange[]>();
+
+  for (const participant of caseRecord.participants) {
+    windowsByParticipant.set(participant.clientId, []);
+  }
+
+  for (const window of caseRecord.availabilityWindows) {
+    const participantWindows = windowsByParticipant.get(window.clientId);
+    if (!participantWindows) {
+      continue;
+    }
+
+    participantWindows.push({
+      startTime: window.startTime,
+      endTime: window.endTime,
+    });
+  }
+
+  for (const windows of windowsByParticipant.values()) {
+    windows.sort((a, b) => a.startTime.getTime() - b.startTime.getTime());
+  }
+
+  const participantIdentifiersSubmitted = caseRecord.participants
+    .filter((participant) => (windowsByParticipant.get(participant.clientId)?.length ?? 0) > 0)
+    .map((participant) => normalizeParticipantIdentifier(participant.client.email));
+  const participantsSubmitted = participantIdentifiersSubmitted.length;
+
+  if (participantsSubmitted < requiredParticipants) {
+    return {
+      windows: [],
+      participantsSubmitted,
+      requiredParticipants,
+      participantIdentifiersSubmitted,
+      hasOverlap: false,
+      reason: "Awaiting availability submissions from all participants.",
+    };
+  }
+
+  let overlap = windowsByParticipant.get(caseRecord.participants[0]?.clientId || "") || [];
+  for (let index = 1; index < caseRecord.participants.length; index += 1) {
+    const participant = caseRecord.participants[index];
+    const participantWindows = windowsByParticipant.get(participant.clientId) || [];
+    overlap = intersectAvailabilityRanges(overlap, participantWindows);
+
+    if (overlap.length === 0) {
+      return {
+        windows: [],
+        participantsSubmitted,
+        requiredParticipants,
+        participantIdentifiersSubmitted,
+        hasOverlap: false,
+        reason: "Participant availability submissions do not overlap.",
+      };
+    }
+  }
+
+  const durationEligibleWindows = overlap.filter((range) => rangeCanFitDuration(range, durationMinutes));
+  if (durationEligibleWindows.length === 0) {
+    return {
+      windows: [],
+      participantsSubmitted,
+      requiredParticipants,
+      participantIdentifiersSubmitted,
+      hasOverlap: false,
+      reason: `No overlapping availability window can fit ${durationMinutes} minutes.`,
+    };
+  }
+
+  return {
+    windows: durationEligibleWindows,
+    participantsSubmitted,
+    requiredParticipants,
+    participantIdentifiersSubmitted,
+    hasOverlap: true,
+    reason: null,
+  };
+}
+
 async function sendDocumentsForStatus(
   tx: Tx,
   caseId: string,
@@ -109,6 +505,10 @@ async function sendDocumentsForStatus(
   const templates = await tx.documentTemplate.findMany({
     where: {
       triggerStatus: status,
+    },
+    select: {
+      id: true,
+      required: true,
     },
   });
 
@@ -162,6 +562,52 @@ async function ensureRequiredDocumentsCompleted(
       `Cannot transition to ${targetStatus}. Required documents pending: ${missing.join(", ")}.`,
       409,
     );
+  }
+}
+
+async function initializeCaseWorkflowStates(tx: Tx, caseId: string, caseWorkflowTemplateId: string) {
+  const steps = await tx.caseWorkflowStep.findMany({
+    where: {
+      templateId: caseWorkflowTemplateId,
+    },
+    select: {
+      id: true,
+    },
+    orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],
+  });
+
+  if (steps.length === 0) {
+    throw new DomainError("Workflow template has no steps.", 409);
+  }
+
+  await tx.caseWorkflowState.createMany({
+    data: steps.map((step) => ({
+      caseId,
+      stepId: step.id,
+      status: "PENDING",
+    })),
+    skipDuplicates: true,
+  });
+}
+
+async function hasIncompleteBlockingSteps(tx: Tx, caseId: string) {
+  const count = await tx.caseWorkflowState.count({
+    where: {
+      caseId,
+      status: "PENDING",
+      step: {
+        required: true,
+        blocksScheduling: true,
+      },
+    },
+  });
+
+  return count > 0;
+}
+
+async function assertCaseEligibleForScheduling(tx: Tx, caseId: string) {
+  if (await hasIncompleteBlockingSteps(tx, caseId)) {
+    throw new DomainError("Case not eligible for scheduling", 409);
   }
 }
 
@@ -266,7 +712,11 @@ async function setCaseStatus(
   });
 }
 
-async function sendSchedulingDocuments(tx: Tx, caseId: string, sessionId: string) {
+async function sendSchedulingDocuments(
+  tx: Tx,
+  caseId: string,
+  sessionId: string,
+) {
   await sendDocumentsForStatus(tx, caseId, CaseStatus.MATCHED);
   await sendDocumentsForStatus(tx, caseId, CaseStatus.SCHEDULED, sessionId);
 }
@@ -320,22 +770,42 @@ export async function createCaseFromIntake(
   input: IntakeSubmissionInput,
   actorUserId?: string,
 ) {
+  const participantCount = input.secondary ? 2 : 1;
+  const counsellingType = normalizeCounsellingType(input.counsellingType, participantCount);
+  const initialStatus = input.initialStatus ?? CaseStatus.NEW;
+  const intakeSource = input.intakeSource?.trim() || "WEB_FORM";
+  const intakeDocumentTriggerStatus =
+    initialStatus === CaseStatus.AWAITING_REVIEW ? CaseStatus.NEW : initialStatus;
+
   const durationFlag =
     typeof input.requestedDurationMinutes === "number"
       ? [`duration:${Math.round(input.requestedDurationMinutes)}`]
       : [];
 
   const created = await db.$transaction(async (tx) => {
+    const workflow = await resolveWorkflowForCase(tx, {
+      workflowCode: input.workflowCode,
+      counsellingType,
+      participantCount,
+    });
+
     const reference = await nextCaseReference(tx);
 
     const caseRecord = await tx.case.create({
       data: {
         reference,
-        status: CaseStatus.NEW,
+        status: initialStatus,
+        counsellingType,
+        intakeSource,
+        intakeExternalId: input.intakeExternalId?.trim() || null,
+        intakeReceivedAt: new Date(),
+        caseWorkflowTemplateId: workflow.id,
         notes: input.notes?.trim() || null,
-        flags: [input.secondary ? "couple" : "individual", ...durationFlag],
+        flags: [input.secondary ? "couple" : "individual", `workflow:${workflow.code}`, ...durationFlag],
       },
     });
+
+    await initializeCaseWorkflowStates(tx, caseRecord.id, workflow.id);
 
     const primaryClient = await tx.client.create({
       data: {
@@ -373,14 +843,25 @@ export async function createCaseFromIntake(
       });
     }
 
-    await sendDocumentsForStatus(tx, caseRecord.id, CaseStatus.NEW);
+    await sendDocumentsForStatus(
+      tx,
+      caseRecord.id,
+      intakeDocumentTriggerStatus,
+      undefined,
+    );
 
     await createAuditLog(tx, {
       caseId: caseRecord.id,
       userId: actorUserId,
       action: "CASE_CREATED_FROM_INTAKE",
       details: {
-        participantCount: input.secondary ? 2 : 1,
+        participantCount,
+        counsellingType,
+        intakeSource,
+        intakeExternalId: input.intakeExternalId?.trim() || null,
+        workflowCode: workflow.code,
+        initialStatus,
+        intakeDocumentTriggerStatus,
       },
     });
 
@@ -389,7 +870,10 @@ export async function createCaseFromIntake(
 
   let allocationError: string | null = null;
 
-  if (input.autoAllocate ?? true) {
+  const shouldAutoAllocate =
+    input.autoAllocate ?? (initialStatus === CaseStatus.NEW || initialStatus === CaseStatus.MATCHED);
+
+  if (shouldAutoAllocate) {
     try {
       await allocateCaseAutomatically(created.id, actorUserId);
     } catch (error) {
@@ -418,6 +902,14 @@ export async function allocateCaseAutomatically(caseId: string, actorUserId?: st
             client: true,
           },
         },
+        availabilityWindows: {
+          where: {
+            active: true,
+          },
+          orderBy: {
+            startTime: "asc",
+          },
+        },
         sessions: {
           where: {
             status: {
@@ -443,9 +935,29 @@ export async function allocateCaseAutomatically(caseId: string, actorUserId?: st
       );
     }
 
+    await assertCaseEligibleForScheduling(tx, caseId);
+
     const participantCount = caseRecord.participants.length;
     const supportsCouplesRequired = participantCount === 2;
     const durationMinutes = resolveSessionDurationMinutes(caseRecord.flags, participantCount);
+    const caseAvailability = computeCaseAvailability(caseRecord, durationMinutes);
+
+    if (!caseAvailability.hasOverlap) {
+      await createAuditLog(tx, {
+        caseId,
+        userId: actorUserId,
+        action: "AUTO_ALLOCATION_BLOCKED_NO_AVAILABILITY_OVERLAP",
+        details: {
+          participantCount,
+          durationMinutes,
+          participantsSubmitted: caseAvailability.participantsSubmitted,
+          requiredParticipants: caseAvailability.requiredParticipants,
+          reason: caseAvailability.reason,
+        },
+      });
+
+      throw new DomainError(caseAvailability.reason || "Case not eligible for scheduling", 409);
+    }
 
     const specialists = await tx.specialist.findMany({
       where: {
@@ -483,10 +995,17 @@ export async function allocateCaseAutomatically(caseId: string, actorUserId?: st
           return null;
         }
 
+        const firstMatchingSlot = slots.find((slot) =>
+          slotFitsAvailability(slot, durationMinutes, caseAvailability.windows),
+        );
+        if (!firstMatchingSlot) {
+          return null;
+        }
+
         return {
           specialist,
           eventType,
-          slot: slots[0],
+          slot: firstMatchingSlot,
         };
       }),
     );
@@ -508,7 +1027,21 @@ export async function allocateCaseAutomatically(caseId: string, actorUserId?: st
       })[0];
 
     if (!firstAvailable) {
-      throw new DomainError("No matching slots were returned by the scheduling provider.", 409);
+      await createAuditLog(tx, {
+        caseId,
+        userId: actorUserId,
+        action: "AUTO_ALLOCATION_NO_PROVIDER_SLOT_IN_CLIENT_AVAILABILITY",
+        details: {
+          participantCount,
+          durationMinutes,
+          overlapWindowCount: caseAvailability.windows.length,
+        },
+      });
+
+      throw new DomainError(
+        "No matching provider slots were returned inside the submitted client availability windows.",
+        409,
+      );
     }
 
     const bookingCaseData: SchedulingCaseData = {
@@ -536,6 +1069,8 @@ export async function allocateCaseAutomatically(caseId: string, actorUserId?: st
         providerStartTime: booking.startTime,
         providerEndTime: booking.endTime,
         providerType: booking.providerType,
+        providerStatus: "scheduled",
+        lastProviderSyncAt: new Date(),
       },
     });
 
@@ -577,6 +1112,7 @@ export async function allocateCaseAutomatically(caseId: string, actorUserId?: st
         providerStartTime: booking.startTime.toISOString(),
         providerEndTime: booking.endTime.toISOString(),
         eventType: firstAvailable.eventType,
+        overlapWindowCount: caseAvailability.windows.length,
       },
     });
 
@@ -612,6 +1148,14 @@ export async function overrideCaseAssignment(input: {
         participants: {
           include: {
             client: true,
+          },
+        },
+        availabilityWindows: {
+          where: {
+            active: true,
+          },
+          orderBy: {
+            startTime: "asc",
           },
         },
         sessions: {
@@ -653,20 +1197,43 @@ export async function overrideCaseAssignment(input: {
     const participantCount = caseRecord.participants.length;
     const eventType = resolveSchedulingEventType(specialist, participantCount);
     const durationMinutes = resolveSessionDurationMinutes(caseRecord.flags, participantCount);
+    const caseAvailability = computeCaseAvailability(caseRecord, durationMinutes);
+
+    await assertCaseEligibleForScheduling(tx, input.caseId);
+
+    if (!caseAvailability.hasOverlap) {
+      await createAuditLog(tx, {
+        caseId: input.caseId,
+        userId: input.actorUserId,
+        action: "MANUAL_OVERRIDE_BLOCKED_NO_AVAILABILITY_OVERLAP",
+        details: {
+          specialistId: input.specialistId,
+          durationMinutes,
+          participantsSubmitted: caseAvailability.participantsSubmitted,
+          requiredParticipants: caseAvailability.requiredParticipants,
+          reason: caseAvailability.reason,
+        },
+      });
+
+      throw new DomainError(caseAvailability.reason || "Case not eligible for scheduling", 409);
+    }
+
     const availableSlots = await schedulingProvider.getAvailableSlots(
       specialist.id,
       eventType,
       durationMinutes,
     );
 
-    if (availableSlots.length === 0) {
+    const earliestSlot = availableSlots.find((slot) =>
+      slotFitsAvailability(slot, durationMinutes, caseAvailability.windows),
+    );
+
+    if (!earliestSlot) {
       throw new DomainError(
-        `Scheduling provider returned no bookable slots for specialist ${specialist.name}.`,
+        `No provider slots for specialist ${specialist.name} fit the submitted client availability windows.`,
         409,
       );
     }
-
-    const earliestSlot = availableSlots[0];
     const attendee = getPrimaryAttendee(caseRecord);
 
     const bookingCaseData: SchedulingCaseData = {
@@ -702,6 +1269,8 @@ export async function overrideCaseAssignment(input: {
             providerStartTime: booking.startTime,
             providerEndTime: booking.endTime,
             providerType: booking.providerType,
+            providerStatus: "scheduled",
+            lastProviderSyncAt: new Date(),
           },
         })
       : await tx.session.create({
@@ -713,6 +1282,8 @@ export async function overrideCaseAssignment(input: {
             providerStartTime: booking.startTime,
             providerEndTime: booking.endTime,
             providerType: booking.providerType,
+            providerStatus: "scheduled",
+            lastProviderSyncAt: new Date(),
           },
         });
 
@@ -758,6 +1329,7 @@ export async function overrideCaseAssignment(input: {
         durationMinutes,
         reason: input.reason,
         matchingRuleOverride: input.matchingRuleOverride ?? null,
+        overlapWindowCount: caseAvailability.windows.length,
       },
     });
 
@@ -901,9 +1473,22 @@ export async function completeDocumentInstance(documentId: string, actorUserId?:
 export async function listCasesForOps() {
   return db.case.findMany({
     include: {
+      caseWorkflowTemplate: true,
       participants: {
         include: {
           client: true,
+        },
+      },
+      workflowStates: {
+        where: {
+          status: "PENDING",
+          step: {
+            blocksScheduling: true,
+            required: true,
+          },
+        },
+        include: {
+          step: true,
         },
       },
       assignedSpecialist: true,
@@ -1028,9 +1613,24 @@ export async function getCaseDetails(caseId: string) {
   return db.case.findUnique({
     where: { id: caseId },
     include: {
+      caseWorkflowTemplate: {
+        include: {
+          steps: {
+            orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],
+          },
+        },
+      },
       participants: {
         include: {
           client: true,
+        },
+      },
+      workflowStates: {
+        include: {
+          step: true,
+        },
+        orderBy: {
+          createdAt: "asc",
         },
       },
       assignedSpecialist: true,
@@ -1479,6 +2079,778 @@ export async function getSessionBriefingForSpecialist(
         },
       },
     },
+  });
+}
+
+export async function listWorkflowTemplatesForOps() {
+  return db.caseWorkflowTemplate.findMany({
+    include: {
+      steps: {
+        orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],
+      },
+    },
+    orderBy: [{ isDefault: "desc" }, { counsellingType: "asc" }, { name: "asc" }],
+  });
+}
+
+export async function listDocumentTemplates() {
+  return db.documentTemplate.findMany({
+    orderBy: [{ triggerStatus: "asc" }, { name: "asc" }],
+  });
+}
+
+export async function createWorkflowTemplate(input: {
+  code: string;
+  name: string;
+  counsellingType: string;
+  description?: string;
+  isDefault?: boolean;
+  actorUserId: string;
+}) {
+  const code = input.code.trim().toUpperCase();
+  const counsellingType = input.counsellingType.trim().toLowerCase();
+
+  if (!code || !input.name.trim() || !counsellingType) {
+    throw new DomainError("Workflow code, name, and counselling type are required.", 409);
+  }
+
+  return db.$transaction(async (tx) => {
+    if (input.isDefault) {
+      await tx.caseWorkflowTemplate.updateMany({
+        where: {
+          isDefault: true,
+        },
+        data: {
+          isDefault: false,
+        },
+      });
+    }
+
+    const created = await tx.caseWorkflowTemplate.create({
+      data: {
+        code,
+        name: input.name.trim(),
+        counsellingType,
+        description: input.description?.trim() || null,
+        isDefault: Boolean(input.isDefault),
+        active: true,
+      },
+    });
+
+    await createAuditLog(tx, {
+      userId: input.actorUserId,
+      action: "WORKFLOW_TEMPLATE_CREATED",
+      details: {
+        caseWorkflowTemplateId: created.id,
+        code: created.code,
+      },
+    });
+
+    return created;
+  });
+}
+
+export async function addWorkflowStep(input: {
+  caseWorkflowTemplateId: string;
+  name: string;
+  type: "FORM" | "REVIEW" | "SYSTEM";
+  formType?: string;
+  required?: boolean;
+  blocksScheduling?: boolean;
+  sortOrder?: number;
+  actorUserId: string;
+}) {
+  const template = await db.caseWorkflowTemplate.findUnique({
+    where: {
+      id: input.caseWorkflowTemplateId,
+    },
+    select: {
+      id: true,
+    },
+  });
+
+  if (!template) {
+    throw new DomainError("Workflow template not found.", 404);
+  }
+
+  const step = await db.caseWorkflowStep.create({
+    data: {
+      templateId: input.caseWorkflowTemplateId,
+      name: input.name.trim(),
+      type: input.type,
+      formType: input.formType?.trim() || null,
+      required: input.required ?? true,
+      blocksScheduling: input.blocksScheduling ?? false,
+      sortOrder: input.sortOrder ?? 0,
+    },
+  });
+
+  await db.auditLog.create({
+    data: {
+      userId: input.actorUserId,
+      action: "WORKFLOW_STEP_CREATED",
+      details: {
+        caseWorkflowTemplateId: input.caseWorkflowTemplateId,
+        workflowStepId: step.id,
+      },
+    },
+  });
+
+  return step;
+}
+
+export async function assignWorkflowTemplateToCase(input: {
+  caseId: string;
+  caseWorkflowTemplateId: string;
+  actorUserId: string;
+}) {
+  return db.$transaction(async (tx) => {
+    const [caseRecord, template] = await Promise.all([
+      tx.case.findUnique({
+        where: {
+          id: input.caseId,
+        },
+        select: {
+          id: true,
+          caseWorkflowTemplateId: true,
+        },
+      }),
+      tx.caseWorkflowTemplate.findFirst({
+        where: {
+          id: input.caseWorkflowTemplateId,
+          active: true,
+        },
+        select: {
+          id: true,
+          code: true,
+          counsellingType: true,
+        },
+      }),
+    ]);
+
+    if (!caseRecord) {
+      throw new DomainError("Case not found.", 404);
+    }
+
+    if (!template) {
+      throw new DomainError("Workflow template not found or inactive.", 404);
+    }
+
+    await tx.case.update({
+      where: {
+        id: input.caseId,
+      },
+      data: {
+        caseWorkflowTemplateId: template.id,
+        counsellingType: template.counsellingType,
+      },
+    });
+
+    await tx.caseWorkflowState.deleteMany({
+      where: {
+        caseId: input.caseId,
+      },
+    });
+
+    await initializeCaseWorkflowStates(tx, input.caseId, template.id);
+
+    await createAuditLog(tx, {
+      caseId: input.caseId,
+      userId: input.actorUserId,
+      action: "CASE_WORKFLOW_ASSIGNED",
+      details: {
+        previousWorkflowTemplateId: caseRecord.caseWorkflowTemplateId ?? null,
+        caseWorkflowTemplateId: template.id,
+        workflowCode: template.code,
+      },
+    });
+
+    return tx.case.findUnique({
+      where: {
+        id: input.caseId,
+      },
+      include: {
+        caseWorkflowTemplate: true,
+        workflowStates: {
+          include: {
+            step: true,
+          },
+          orderBy: [{ createdAt: "asc" }],
+        },
+      },
+    });
+  });
+}
+
+function normalizeFormType(formType: string) {
+  return formType.trim().toUpperCase();
+}
+
+async function resolveCaseForFormSubmission(
+  tx: Tx,
+  input: {
+    participantIdentifier?: string;
+    caseId?: string;
+    caseReference?: string;
+  },
+) {
+  const participantIdentifier = input.participantIdentifier?.trim();
+  const participantEmail = participantIdentifier?.includes("@")
+    ? participantIdentifier.toLowerCase()
+    : null;
+
+  if (input.caseId?.trim()) {
+    return tx.case.findFirst({
+      where: {
+        id: input.caseId.trim(),
+        ...(participantIdentifier
+          ? {
+              participants: {
+                some: {
+                  client: participantEmail
+                    ? { email: participantEmail }
+                    : {
+                        OR: [
+                          { phone: participantIdentifier },
+                          { email: participantIdentifier.toLowerCase() },
+                        ],
+                      },
+                },
+              },
+            }
+          : {}),
+      },
+      include: {
+        participants: {
+          include: {
+            client: true,
+          },
+        },
+        availabilityWindows: {
+          where: {
+            active: true,
+          },
+          orderBy: {
+            startTime: "asc",
+          },
+        },
+      },
+    });
+  }
+
+  if (input.caseReference?.trim()) {
+    return tx.case.findFirst({
+      where: {
+        reference: input.caseReference.trim().toUpperCase(),
+        ...(participantIdentifier
+          ? {
+              participants: {
+                some: {
+                  client: participantEmail
+                    ? { email: participantEmail }
+                    : {
+                        OR: [
+                          { phone: participantIdentifier },
+                          { email: participantIdentifier.toLowerCase() },
+                        ],
+                      },
+                },
+              },
+            }
+          : {}),
+      },
+      include: {
+        participants: {
+          include: {
+            client: true,
+          },
+        },
+        availabilityWindows: {
+          where: {
+            active: true,
+          },
+          orderBy: {
+            startTime: "asc",
+          },
+        },
+      },
+    });
+  }
+
+  if (!participantIdentifier) {
+    return null;
+  }
+
+  return tx.case.findFirst({
+    where: {
+      participants: {
+        some: {
+          client: participantEmail
+            ? { email: participantEmail }
+            : {
+                OR: [
+                  { phone: participantIdentifier },
+                  { email: participantIdentifier.toLowerCase() },
+                ],
+              },
+        },
+      },
+      status: {
+        not: CaseStatus.CLOSED,
+      },
+    },
+    include: {
+      participants: {
+        include: {
+          client: true,
+        },
+      },
+      availabilityWindows: {
+        where: {
+          active: true,
+        },
+        orderBy: {
+          startTime: "asc",
+        },
+      },
+    },
+    orderBy: {
+      createdAt: "desc",
+    },
+  });
+}
+
+export async function ingestAvailabilitySubmission(input: {
+  participantIdentifier: string;
+  windows: AvailabilityWindowInput[];
+  timezone?: string;
+  caseId?: string;
+  caseReference?: string;
+  metadata?: Record<string, unknown>;
+  source?: string;
+}) {
+  return db.$transaction(async (tx) => {
+    const participantIdentifier = input.participantIdentifier.trim();
+    if (!participantIdentifier) {
+      throw new DomainError("participantIdentifier is required.", 400);
+    }
+
+    if (!Array.isArray(input.windows)) {
+      throw new DomainError("windows must be an array.", 400);
+    }
+
+    const normalizedWindows = normalizeAvailabilityRanges(input.windows);
+    const timezone = input.timezone?.trim() || "UTC";
+    const source = input.source?.trim() || "availability_form";
+    const submittedAt = new Date();
+
+    const caseRecord = await resolveCaseForFormSubmission(tx, {
+      participantIdentifier,
+      caseId: input.caseId,
+      caseReference: input.caseReference,
+    });
+
+    if (!caseRecord) {
+      throw new DomainError("No matching case found for availability submission.", 404);
+    }
+
+    const participant = findParticipantByIdentifier(caseRecord, participantIdentifier);
+    if (!participant) {
+      throw new DomainError("Participant was not found on this case.", 404);
+    }
+
+    const normalizedIdentifier = normalizeParticipantIdentifier(participantIdentifier);
+
+    await tx.caseAvailabilityWindow.updateMany({
+      where: {
+        caseId: caseRecord.id,
+        clientId: participant.clientId,
+        active: true,
+      },
+      data: {
+        active: false,
+      },
+    });
+
+    await tx.caseAvailabilityWindow.createMany({
+      data: normalizedWindows.map((window) => ({
+        caseId: caseRecord.id,
+        clientId: participant.clientId,
+        startTime: window.startTime,
+        endTime: window.endTime,
+        timezone,
+        source,
+        submittedAt,
+        active: true,
+        metadata: {
+          ...(input.metadata || {}),
+          participantIdentifier: normalizedIdentifier,
+          submittedAt: submittedAt.toISOString(),
+        },
+      })),
+    });
+
+    const refreshedCase = await tx.case.findUnique({
+      where: {
+        id: caseRecord.id,
+      },
+      include: {
+        participants: {
+          include: {
+            client: true,
+          },
+        },
+        availabilityWindows: {
+          where: {
+            active: true,
+          },
+          orderBy: {
+            startTime: "asc",
+          },
+        },
+      },
+    });
+
+    if (!refreshedCase) {
+      throw new DomainError("Case not found after availability submission.", 404);
+    }
+
+    const participantCount = refreshedCase.participants.length;
+    const durationMinutes = resolveSessionDurationMinutes(refreshedCase.flags, participantCount);
+    const availability = computeCaseAvailability(refreshedCase, durationMinutes);
+
+    const availabilityStep = await tx.caseWorkflowState.findFirst({
+      where: {
+        caseId: refreshedCase.id,
+        step: {
+          type: "FORM",
+          OR: [
+            {
+              formType: {
+                equals: AVAILABILITY_SUBMISSION_FORM_TYPE,
+                mode: "insensitive",
+              },
+            },
+            {
+              name: {
+                equals: AVAILABILITY_SUBMISSION_FORM_TYPE,
+                mode: "insensitive",
+              },
+            },
+          ],
+        },
+      },
+      include: {
+        step: true,
+      },
+      orderBy: [{ step: { sortOrder: "asc" } }, { createdAt: "asc" }],
+    });
+
+    if (availabilityStep) {
+      const shouldMarkCompleted =
+        availability.participantsSubmitted >= availability.requiredParticipants &&
+        availability.hasOverlap;
+
+      await tx.caseWorkflowState.update({
+        where: {
+          id: availabilityStep.id,
+        },
+        data: {
+          status: shouldMarkCompleted ? "COMPLETED" : "PENDING",
+          completedAt: shouldMarkCompleted ? submittedAt : null,
+          metadata: {
+            ...(input.metadata || {}),
+            source,
+            formType: AVAILABILITY_SUBMISSION_FORM_TYPE,
+            timezone,
+            ingestedAt: submittedAt.toISOString(),
+            participantIdentifier: normalizedIdentifier,
+            participantsCompleted: availability.participantIdentifiersSubmitted,
+            participantsSubmitted: availability.participantsSubmitted,
+            requiredParticipants: availability.requiredParticipants,
+            overlapWindowCount: availability.windows.length,
+            overlapReason: availability.reason,
+            submittedWindows: normalizedWindows.map((window) => ({
+              startTime: window.startTime.toISOString(),
+              endTime: window.endTime.toISOString(),
+            })),
+          },
+        },
+      });
+    }
+
+    await createAuditLog(tx, {
+      caseId: refreshedCase.id,
+      action: "AVAILABILITY_SUBMISSION_INGESTED",
+      details: {
+        caseReference: refreshedCase.reference,
+        participantIdentifier: normalizedIdentifier,
+        participantClientId: participant.clientId,
+        submittedWindowCount: normalizedWindows.length,
+        timezone,
+        source,
+        participantsSubmitted: availability.participantsSubmitted,
+        requiredParticipants: availability.requiredParticipants,
+        overlapWindowCount: availability.windows.length,
+        overlapReason: availability.reason,
+      },
+    });
+
+    const pendingBlockingSteps = await tx.caseWorkflowState.findMany({
+      where: {
+        caseId: refreshedCase.id,
+        status: "PENDING",
+        step: {
+          required: true,
+          blocksScheduling: true,
+        },
+      },
+      include: {
+        step: true,
+      },
+      orderBy: [{ step: { sortOrder: "asc" } }, { createdAt: "asc" }],
+    });
+
+    return {
+      caseId: refreshedCase.id,
+      caseReference: refreshedCase.reference,
+      participantClientId: participant.clientId,
+      submittedWindowCount: normalizedWindows.length,
+      participantsSubmitted: availability.participantsSubmitted,
+      requiredParticipants: availability.requiredParticipants,
+      overlapWindowCount: availability.windows.length,
+      overlapReason: availability.reason,
+      hasOverlap: availability.hasOverlap,
+      eligibleForScheduling: pendingBlockingSteps.length === 0,
+      pendingBlockingSteps: pendingBlockingSteps.map((state) => ({
+        id: state.stepId,
+        name: state.step.name,
+        formType: state.step.formType,
+        type: state.step.type,
+      })),
+    };
+  });
+}
+
+export async function getCaseSchedulingEligibility(caseId: string) {
+  const pendingBlockingSteps = await db.caseWorkflowState.findMany({
+    where: {
+      caseId,
+      status: "PENDING",
+      step: {
+        required: true,
+        blocksScheduling: true,
+      },
+    },
+    include: {
+      step: true,
+    },
+    orderBy: [{ step: { sortOrder: "asc" } }, { createdAt: "asc" }],
+  });
+
+  return {
+    eligible: pendingBlockingSteps.length === 0,
+    pendingBlockingSteps: pendingBlockingSteps.map((state) => ({
+      stepId: state.stepId,
+      name: state.step.name,
+      formType: state.step.formType,
+      type: state.step.type,
+    })),
+  };
+}
+
+export async function ingestFormSubmission(input: {
+  formType: string;
+  participantIdentifier: string;
+  caseId?: string;
+  caseReference?: string;
+  metadata?: Record<string, unknown>;
+  source?: string;
+}) {
+  return db.$transaction(async (tx) => {
+    const formType = normalizeFormType(input.formType);
+    const participantIdentifier = input.participantIdentifier.trim();
+    if (!formType) {
+      throw new DomainError("formType is required.", 400);
+    }
+    if (formType === AVAILABILITY_SUBMISSION_FORM_TYPE) {
+      throw new DomainError(
+        "Use /availability/submission for availability windows.",
+        409,
+      );
+    }
+    if (!participantIdentifier) {
+      throw new DomainError("participantIdentifier is required.", 400);
+    }
+
+    const caseRecord = await resolveCaseForFormSubmission(tx, {
+      participantIdentifier,
+      caseId: input.caseId,
+      caseReference: input.caseReference,
+    });
+
+    if (!caseRecord) {
+      throw new DomainError("No matching case found for form submission.", 404);
+    }
+
+    const pendingState = await tx.caseWorkflowState.findFirst({
+      where: {
+        caseId: caseRecord.id,
+        status: "PENDING",
+        step: {
+          type: "FORM",
+          OR: [
+            {
+              formType: {
+                equals: formType,
+                mode: "insensitive",
+              },
+            },
+            {
+              name: {
+                equals: formType,
+                mode: "insensitive",
+              },
+            },
+          ],
+        },
+      },
+      include: {
+        step: true,
+      },
+      orderBy: [{ step: { sortOrder: "asc" } }, { createdAt: "asc" }],
+    });
+
+    const existingCompleted = await tx.caseWorkflowState.findFirst({
+      where: {
+        caseId: caseRecord.id,
+        status: "COMPLETED",
+        step: {
+          type: "FORM",
+          OR: [
+            {
+              formType: {
+                equals: formType,
+                mode: "insensitive",
+              },
+            },
+            {
+              name: {
+                equals: formType,
+                mode: "insensitive",
+              },
+            },
+          ],
+        },
+      },
+      include: {
+        step: true,
+      },
+      orderBy: [{ step: { sortOrder: "asc" } }, { completedAt: "desc" }],
+    });
+
+    const targetState = pendingState ?? existingCompleted;
+    if (!targetState) {
+      throw new DomainError(
+        `No workflow form step matches formType '${formType}' for case ${caseRecord.reference}.`,
+        409,
+      );
+    }
+
+    const participantCount = caseRecord.participants.length;
+    const requiresAllParticipants = stepRequiresAllParticipants(targetState.step.name);
+    const normalizedIdentifier = normalizeParticipantIdentifier(participantIdentifier);
+    const existingParticipantCompletions = Array.isArray(
+      (targetState.metadata as { participantsCompleted?: unknown } | null)?.participantsCompleted,
+    )
+      ? (
+          (targetState.metadata as { participantsCompleted: unknown[] }).participantsCompleted
+        )
+          .map((value) => String(value))
+          .map((value) => normalizeParticipantIdentifier(value))
+      : [];
+
+    const participantCompletions = Array.from(
+      new Set([...existingParticipantCompletions, normalizedIdentifier]),
+    );
+    const shouldMarkCompleted =
+      targetState.status === "COMPLETED" ||
+      !requiresAllParticipants ||
+      participantCompletions.length >= participantCount;
+
+    const updated =
+      targetState.status === "PENDING"
+        ? await tx.caseWorkflowState.update({
+            where: {
+              id: targetState.id,
+            },
+            data: {
+              status: shouldMarkCompleted ? "COMPLETED" : "PENDING",
+              completedAt: shouldMarkCompleted ? new Date() : null,
+              metadata: {
+                ...(input.metadata || {}),
+                source: input.source || "external_form",
+                formType,
+                ingestedAt: new Date().toISOString(),
+                participantIdentifier: normalizedIdentifier,
+                participantsCompleted: participantCompletions,
+              },
+            },
+            include: {
+              step: true,
+            },
+          })
+        : targetState;
+
+    await createAuditLog(tx, {
+      caseId: caseRecord.id,
+      action: "FORM_SUBMISSION_INGESTED",
+      details: {
+        caseReference: caseRecord.reference,
+        formType,
+        workflowStepId: updated.stepId,
+        participantIdentifier: normalizedIdentifier,
+        source: input.source || "external_form",
+      },
+    });
+
+    const pendingBlockingSteps = await tx.caseWorkflowState.findMany({
+      where: {
+        caseId: caseRecord.id,
+        status: "PENDING",
+        step: {
+          required: true,
+          blocksScheduling: true,
+        },
+      },
+      include: {
+        step: true,
+      },
+      orderBy: [{ step: { sortOrder: "asc" } }, { createdAt: "asc" }],
+    });
+
+    return {
+      caseId: caseRecord.id,
+      caseReference: caseRecord.reference,
+      completedStep: {
+        id: updated.stepId,
+        name: updated.step.name,
+        formType: updated.step.formType,
+      },
+      eligibleForScheduling: pendingBlockingSteps.length === 0,
+      pendingBlockingSteps: pendingBlockingSteps.map((state) => ({
+        id: state.stepId,
+        name: state.step.name,
+        formType: state.step.formType,
+        type: state.step.type,
+      })),
+      requiresAllParticipants,
+      participantCompletions: requiresAllParticipants ? participantCompletions.length : 1,
+      requiredParticipantCompletions: requiresAllParticipants ? participantCount : 1,
+      alreadyCompleted: targetState.status === "COMPLETED" && requiresAllParticipants
+        ? participantCompletions.length >= participantCount
+        : targetState.status === "COMPLETED",
+    };
   });
 }
 

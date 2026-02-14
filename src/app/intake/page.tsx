@@ -23,8 +23,8 @@ export default async function IntakePage({ searchParams }: IntakePageProps) {
             <p className="cg-nav-label mt-6 text-center text-white/85">Public Intake</p>
             <h1 className="mt-2 text-center">Start A New Engagement Request</h1>
             <p className="mx-auto mt-3 max-w-2xl text-center text-sm font-normal text-white/85">
-              Clients submit intake details. The system creates a case, auto-assigns a specialist,
-              and creates a controlled calendar entry.
+              Clients submit intake details. The system creates a pending case for review, then
+              operations can match a specialist once required workflow steps are complete.
             </p>
           </header>
         </div>

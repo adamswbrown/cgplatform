@@ -41,6 +41,17 @@ enum DocumentState {
   COMPLETED
 }
 
+enum WorkflowStepType {
+  FORM
+  REVIEW
+  SYSTEM
+}
+
+enum CaseWorkflowStepStatus {
+  PENDING
+  COMPLETED
+}
+
 model Client {
   id           String            @id @default(cuid())
   firstName    String
@@ -48,6 +59,7 @@ model Client {
   email        String
   phone        String?
   participants CaseParticipant[]
+  availabilityWindows CaseAvailabilityWindow[]
   createdAt    DateTime          @default(now())
   updatedAt    DateTime          @updatedAt
 }
@@ -56,12 +68,20 @@ model Case {
   id                   String             @id @default(cuid())
   reference            String             @unique
   status               CaseStatus         @default(NEW)
+  counsellingType      String?
+  intakeSource         String             @default("WEB_FORM")
+  intakeExternalId     String?
+  intakeReceivedAt     DateTime?
+  caseWorkflowTemplateId String?
   notes                String?
   flags                String[]           @default([])
   manualOverride       Boolean            @default(false)
   assignedSpecialistId String?
   assignedSpecialist   Specialist?        @relation("CaseAssignedSpecialist", fields: [assignedSpecialistId], references: [id], onDelete: SetNull)
+  caseWorkflowTemplate CaseWorkflowTemplate?  @relation(fields: [caseWorkflowTemplateId], references: [id], onDelete: SetNull)
   participants         CaseParticipant[]
+  availabilityWindows  CaseAvailabilityWindow[]
+  workflowStates       CaseWorkflowState[]
   sessions             Session[]
   documents            DocumentInstance[]
   auditLogs            AuditLog[]
@@ -70,6 +90,8 @@ model Case {
 
   @@index([status])
   @@index([assignedSpecialistId])
+  @@index([caseWorkflowTemplateId])
+  @@index([intakeSource])
 }
 
 model CaseParticipant {
@@ -83,6 +105,27 @@ model CaseParticipant {
 
   @@unique([caseId, clientId])
   @@index([caseId])
+}
+
+model CaseAvailabilityWindow {
+  id           String   @id @default(cuid())
+  caseId        String
+  clientId      String
+  startTime     DateTime
+  endTime       DateTime
+  timezone      String
+  source        String   @default("availability_form")
+  metadata      Json?
+  active        Boolean  @default(true)
+  submittedAt   DateTime @default(now())
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  case          Case     @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  client        Client   @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
+  @@index([caseId, active, startTime])
+  @@index([clientId, active, startTime])
+  @@index([caseId, clientId, active])
 }
 
 model Specialist {
@@ -112,6 +155,8 @@ model Session {
   providerStartTime DateTime
   providerEndTime   DateTime
   providerType      String
+  providerStatus    String        @default("scheduled")
+  lastProviderSyncAt DateTime     @default(now())
   notes             String?
   case              Case          @relation(fields: [caseId], references: [id], onDelete: Cascade)
   specialist        Specialist    @relation(fields: [specialistId], references: [id], onDelete: Restrict)
@@ -153,6 +198,57 @@ model DocumentInstance {
 
   @@unique([caseId, templateId])
   @@index([caseId, status])
+}
+
+model CaseWorkflowTemplate {
+  id             String           @id @default(cuid())
+  code           String           @unique
+  name           String
+  counsellingType String
+  active         Boolean          @default(true)
+  isDefault      Boolean          @default(false)
+  description    String?
+  steps          CaseWorkflowStep[]
+  cases          Case[]
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+
+  @@index([counsellingType, active])
+}
+
+model CaseWorkflowStep {
+  id               String                 @id @default(cuid())
+  templateId       String
+  name             String
+  formType         String?
+  type             WorkflowStepType
+  required         Boolean                @default(true)
+  blocksScheduling Boolean                @default(false)
+  sortOrder        Int                    @default(0)
+  template         CaseWorkflowTemplate   @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  caseStates       CaseWorkflowState[]
+  createdAt        DateTime               @default(now())
+  updatedAt        DateTime               @updatedAt
+
+  @@index([templateId, sortOrder])
+  @@index([templateId, formType])
+}
+
+model CaseWorkflowState {
+  id          String                 @id @default(cuid())
+  caseId       String
+  stepId       String
+  status       CaseWorkflowStepStatus @default(PENDING)
+  metadata     Json?
+  completedAt  DateTime?
+  case         Case                   @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  step         CaseWorkflowStep       @relation(fields: [stepId], references: [id], onDelete: Restrict)
+  createdAt    DateTime               @default(now())
+  updatedAt    DateTime               @updatedAt
+
+  @@unique([caseId, stepId])
+  @@index([caseId, status])
+  @@index([stepId, status])
 }
 
 model AuditLog {

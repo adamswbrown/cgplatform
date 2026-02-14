@@ -1,0 +1,13 @@
+
+Running 8 tests using 1 worker
+
+  ✓  1 [chromium] › tests/e2e/intake-to-closure.spec.ts:202:5 › intake to closed case smoke flow (5.8s)
+  ✓  2 [chromium] › tests/e2e/intake-to-closure.spec.ts:253:5 › ops can edit specialist profile (2.1s)
+  ✓  3 [chromium] › tests/e2e/intake-to-closure.spec.ts:275:5 › client dashboards are role scoped (2.2s)
+  ✓  4 [chromium] › tests/e2e/intake-to-closure.spec.ts:302:5 › one-to-one bookings support 30, 60, 90 minute durations (1.3s)
+  ✓  5 [chromium] › tests/e2e/intake-to-closure.spec.ts:326:5 › scheduling stays blocked until blocking workflow form steps are completed (484ms)
+  ✓  6 [chromium] › tests/e2e/intake-to-closure.spec.ts:349:5 › many-to-one bookings support 30, 60, 90 minute durations (993ms)
+  ✓  7 [chromium] › tests/e2e/intake-to-closure.spec.ts:378:5 › provider prevents booking clashes for one-to-one and many-to-one bookings (761ms)
+  ✓  8 [chromium] › tests/e2e/intake-to-closure.spec.ts:474:5 › terms and conditions must be completed before ready-to-schedule transition (485ms)
+
+  8 passed (26.8s)

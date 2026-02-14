@@ -1,0 +1,89 @@
+{
+  "generatedAt": "2026-02-14T11:54:53.041Z",
+  "durationCases": {
+    "Single30": {
+      "caseReference": "CASE-1018",
+      "participantCount": 1,
+      "requestedDuration": 30,
+      "actualDuration": 30,
+      "providerStartTime": "2026-02-16T11:30:00.000Z",
+      "providerEndTime": "2026-02-16T12:00:00.000Z"
+    },
+    "Single60": {
+      "caseReference": "CASE-1019",
+      "participantCount": 1,
+      "requestedDuration": 60,
+      "actualDuration": 60,
+      "providerStartTime": "2026-02-16T13:00:00.000Z",
+      "providerEndTime": "2026-02-16T14:00:00.000Z"
+    },
+    "Single90": {
+      "caseReference": "CASE-1020",
+      "participantCount": 1,
+      "requestedDuration": 90,
+      "actualDuration": 90,
+      "providerStartTime": "2026-02-16T14:00:00.000Z",
+      "providerEndTime": "2026-02-16T15:30:00.000Z"
+    },
+    "CoupleA30": {
+      "caseReference": "CASE-1022",
+      "participantCount": 2,
+      "requestedDuration": 30,
+      "actualDuration": 30,
+      "providerStartTime": "2026-02-16T15:30:00.000Z",
+      "providerEndTime": "2026-02-16T16:00:00.000Z"
+    },
+    "CoupleA60": {
+      "caseReference": "CASE-1023",
+      "participantCount": 2,
+      "requestedDuration": 60,
+      "actualDuration": 60,
+      "providerStartTime": "2026-02-16T16:00:00.000Z",
+      "providerEndTime": "2026-02-16T17:00:00.000Z"
+    },
+    "CoupleA90": {
+      "caseReference": "CASE-1024",
+      "participantCount": 2,
+      "requestedDuration": 90,
+      "actualDuration": 90,
+      "providerStartTime": "2026-02-17T09:00:00.000Z",
+      "providerEndTime": "2026-02-17T10:30:00.000Z"
+    }
+  },
+  "durationAssertions": {
+    "singles": true,
+    "couples": true
+  },
+  "schedulingGateProof": {
+    "caseReference": "CASE-1029",
+    "pendingBlockingSteps": [
+      {
+        "name": "Terms & Conditions Accepted",
+        "formType": "TERMS_AND_CONDITIONS"
+      },
+      {
+        "name": "Engagement Contract Signed",
+        "formType": "CONTRACT"
+      }
+    ],
+    "blockedBeforeCompletion": true
+  },
+  "clashAssertions": {
+    "singlePair": {
+      "sameSpecialist": true,
+      "overlaps": false
+    },
+    "couplePair": {
+      "sameSpecialist": true,
+      "overlaps": false
+    },
+    "globalActiveOverlapCount": 0
+  },
+  "smokeFlowAssertion": {
+    "caseReference": "CASE-1017",
+    "status": "CLOSED",
+    "sessionStatuses": [
+      "COMPLETED"
+    ]
+  }
+}

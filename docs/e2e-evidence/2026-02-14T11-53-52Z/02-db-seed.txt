@@ -1,0 +1,9 @@
+
+> codex-cgplatform@0.1.0 db:seed
+> node prisma/seed.mjs
+
+Seed completed.
+Login credentials:
+  OPS: ops@demo.local / password123
+  Specialist: avery.specialist@demo.local / password123
+  Specialist: jordan.specialist@demo.local / password123

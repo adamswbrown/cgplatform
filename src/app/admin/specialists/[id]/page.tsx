@@ -48,6 +48,7 @@ export default async function SpecialistProfilePage({
         { href: "/admin/cases", label: "All Cases" },
         { href: "/admin/clients", label: "All Clients" },
         { href: "/admin/specialists", label: "Specialists" },
+        { href: "/admin/workflows", label: "Workflows" },
         { href: "/intake", label: "Public Intake" },
       ]}
     >

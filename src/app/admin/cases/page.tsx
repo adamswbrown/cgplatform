@@ -18,13 +18,14 @@ export default async function AdminCasesPage({ searchParams }: AdminCasesPagePro
   return (
     <AuthenticatedShell
       title="Operations Cases"
-      subtitle="Track lifecycle progression, assignments, document completion, and auditability."
+      subtitle="Track lifecycle progression, workflow compliance, specialist assignment, and auditability."
       userName={user.name}
       role={user.role}
       navItems={[
         { href: "/admin/cases", label: "All Cases" },
         { href: "/admin/clients", label: "All Clients" },
         { href: "/admin/specialists", label: "Specialists" },
+        { href: "/admin/workflows", label: "Workflows" },
         { href: "/intake", label: "Public Intake" },
       ]}
     >
@@ -42,9 +43,11 @@ export default async function AdminCasesPage({ searchParams }: AdminCasesPagePro
                 <th className="px-4 py-3 font-semibold">Reference</th>
                 <th className="px-4 py-3 font-semibold">Status</th>
                 <th className="px-4 py-3 font-semibold">Participants</th>
+                <th className="px-4 py-3 font-semibold">Workflow</th>
                 <th className="px-4 py-3 font-semibold">Assigned Specialist</th>
                 <th className="px-4 py-3 font-semibold">Next Session</th>
                 <th className="px-4 py-3 font-semibold">Required Docs</th>
+                <th className="px-4 py-3 font-semibold">Scheduling Gate</th>
                 <th className="px-4 py-3 font-semibold">Details</th>
               </tr>
             </thead>
@@ -55,6 +58,7 @@ export default async function AdminCasesPage({ searchParams }: AdminCasesPagePro
                   (doc) => doc.status === "COMPLETED",
                 );
                 const nextSession = caseItem.sessions[0] || null;
+                const pendingBlockingSteps = caseItem.workflowStates.length;
 
                 return (
                   <tr key={caseItem.id} className="hover:bg-slate-50">
@@ -65,12 +69,20 @@ export default async function AdminCasesPage({ searchParams }: AdminCasesPagePro
                         .map((participant) => `${participant.client.firstName} ${participant.client.lastName}`)
                         .join(" & ")}
                     </td>
+                    <td className="px-4 py-3">
+                      {caseItem.caseWorkflowTemplate
+                        ? `${caseItem.caseWorkflowTemplate.name} (${caseItem.caseWorkflowTemplate.counsellingType})`
+                        : "Unassigned"}
+                    </td>
                     <td className="px-4 py-3">{caseItem.assignedSpecialist?.name || "Unassigned"}</td>
                     <td className="px-4 py-3">
                       {nextSession ? formatDateTime(nextSession.providerStartTime) : "No session"}
                     </td>
                     <td className="px-4 py-3">
                       {completedRequired.length}/{requiredDocs.length}
+                    </td>
+                    <td className="px-4 py-3">
+                      {pendingBlockingSteps === 0 ? "Eligible" : `${pendingBlockingSteps} pending`}
                     </td>
                     <td className="px-4 py-3">
                       <Link

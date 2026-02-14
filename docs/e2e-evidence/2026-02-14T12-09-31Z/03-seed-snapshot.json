@@ -1,0 +1,149 @@
+{
+  "snapshotAt": "2026-02-14T12:09:58.821Z",
+  "counts": {
+    "clients": 3,
+    "cases": 2,
+    "specialists": 3,
+    "caseWorkflowTemplates": 2,
+    "caseWorkflowSteps": 5,
+    "caseWorkflowStates": 5,
+    "sessions": 1,
+    "documentInstances": 4
+  },
+  "workflowTemplates": [
+    {
+      "id": "cmlm9xojw000gohtoh1vmex12",
+      "code": "COUPLES_COUNSELLING",
+      "name": "Couples Counselling",
+      "counsellingType": "couples",
+      "active": true,
+      "isDefault": false,
+      "description": "Workflow requiring form completion from both participants.",
+      "createdAt": "2026-02-14T12:09:43.052Z",
+      "updatedAt": "2026-02-14T12:09:43.052Z",
+      "steps": [
+        {
+          "id": "cmlm9xojz000nohto8omryd8f",
+          "name": "Intake form (both participants)",
+          "formType": "INTAKE_FORM",
+          "type": "FORM",
+          "required": true,
+          "blocksScheduling": true,
+          "sortOrder": 10
+        },
+        {
+          "id": "cmlm9xoki000pohtodx4jnooe",
+          "name": "Consent form (both participants)",
+          "formType": "CONSENT_FORM",
+          "type": "FORM",
+          "required": true,
+          "blocksScheduling": true,
+          "sortOrder": 20
+        },
+        {
+          "id": "cmlm9xokj000rohto3h387sfw",
+          "name": "Agreement form",
+          "formType": "AGREEMENT_FORM",
+          "type": "FORM",
+          "required": true,
+          "blocksScheduling": true,
+          "sortOrder": 30
+        }
+      ]
+    },
+    {
+      "id": "cmlm9xojw000hohtoi4zy7y3x",
+      "code": "INDIVIDUAL_COUNSELLING",
+      "name": "Individual Counselling",
+      "counsellingType": "individual",
+      "active": true,
+      "isDefault": true,
+      "description": "Workflow for one-to-one counselling.",
+      "createdAt": "2026-02-14T12:09:43.052Z",
+      "updatedAt": "2026-02-14T12:09:43.052Z",
+      "steps": [
+        {
+          "id": "cmlm9xojz000lohtop0vy2rz1",
+          "name": "Intake form",
+          "formType": "INTAKE_FORM",
+          "type": "FORM",
+          "required": true,
+          "blocksScheduling": true,
+          "sortOrder": 10
+        },
+        {
+          "id": "cmlm9xojz000mohtouh6mbucu",
+          "name": "Terms & conditions",
+          "formType": "TERMS_AND_CONDITIONS",
+          "type": "FORM",
+          "required": true,
+          "blocksScheduling": true,
+          "sortOrder": 20
+        }
+      ]
+    }
+  ],
+  "seededCases": [
+    {
+      "id": "cmlm9xol5000tohtozwns8hxq",
+      "reference": "CASE-1001",
+      "status": "SCHEDULED",
+      "counsellingType": "individual",
+      "caseWorkflowTemplate": {
+        "id": "cmlm9xojw000hohtoi4zy7y3x",
+        "code": "INDIVIDUAL_COUNSELLING",
+        "counsellingType": "individual"
+      },
+      "workflowStates": [
+        {
+          "stepName": "Intake form",
+          "formType": "INTAKE_FORM",
+          "required": true,
+          "blocksScheduling": true,
+          "status": "COMPLETED"
+        },
+        {
+          "stepName": "Terms & conditions",
+          "formType": "TERMS_AND_CONDITIONS",
+          "required": true,
+          "blocksScheduling": true,
+          "status": "COMPLETED"
+        }
+      ]
+    },
+    {
+      "id": "cmlm9xonu0014ohtobyd93tr9",
+      "reference": "CASE-1002",
+      "status": "NEW",
+      "counsellingType": "couples",
+      "caseWorkflowTemplate": {
+        "id": "cmlm9xojw000gohtoh1vmex12",
+        "code": "COUPLES_COUNSELLING",
+        "counsellingType": "couples"
+      },
+      "workflowStates": [
+        {
+          "stepName": "Intake form (both participants)",
+          "formType": "INTAKE_FORM",
+          "required": true,
+          "blocksScheduling": true,
+          "status": "PENDING"
+        },
+        {
+          "stepName": "Consent form (both participants)",
+          "formType": "CONSENT_FORM",
+          "required": true,
+          "blocksScheduling": true,
+          "status": "PENDING"
+        },
+        {
+          "stepName": "Agreement form",
+          "formType": "AGREEMENT_FORM",
+          "required": true,
+          "blocksScheduling": true,
+          "status": "PENDING"
+        }
+      ]
+    }
+  ]
+}
