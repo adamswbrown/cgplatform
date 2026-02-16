@@ -1,11 +1,14 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import {
+  DomainError,
   domainErrorMessage,
   ingestAvailabilitySubmission,
   ingestFormSubmission,
   isDomainError,
 } from "@/lib/case-service";
+import { db } from "@/lib/db";
+import { hasValidFormAccessSession } from "@/lib/form-access";
 
 const AVAILABILITY_SUBMISSION_FORM_TYPE = "AVAILABILITY_SUBMISSION";
 
@@ -15,6 +18,7 @@ const formSubmissionSchema = z
     participantIdentifier: z.string().min(1),
     caseId: z.string().optional(),
     caseReference: z.string().optional(),
+    accessKey: z.string().optional(),
     answersMetadata: z.record(z.string(), z.unknown()).optional(),
     metadata: z.record(z.string(), z.unknown()).optional(),
     source: z.string().optional(),
@@ -31,12 +35,92 @@ const formSubmissionSchema = z
     }
   });
 
+function normalizeIdentifier(value: string) {
+  return value.trim().toLowerCase();
+}
+
+async function assertPinGateIfRequired(payload: {
+  formType: string;
+  participantIdentifier: string;
+  caseId?: string;
+  caseReference?: string;
+  accessKey?: string;
+}) {
+  const normalizedParticipant = normalizeIdentifier(payload.participantIdentifier);
+  const caseFilters = [];
+  if (payload.caseId) {
+    caseFilters.push({ caseId: payload.caseId });
+  }
+  if (payload.caseReference) {
+    caseFilters.push({ case: { reference: payload.caseReference } });
+  }
+
+  if (caseFilters.length === 0) {
+    return;
+  }
+
+  const activePin = await db.formAccessPin.findFirst({
+    where: {
+      formType: payload.formType,
+      revokedAt: null,
+      expiresAt: {
+        gt: new Date(),
+      },
+      OR: caseFilters,
+      client: {
+        OR: [{ id: payload.participantIdentifier }, { email: normalizedParticipant }],
+      },
+    },
+    include: {
+      client: {
+        select: {
+          email: true,
+        },
+      },
+    },
+  });
+
+  if (!activePin) {
+    return;
+  }
+
+  if (!payload.accessKey) {
+    throw new DomainError("This form requires PIN verification before submission.", 401);
+  }
+
+  const session = await hasValidFormAccessSession({
+    accessKey: payload.accessKey,
+    formType: payload.formType,
+  });
+  if (!session) {
+    throw new DomainError("PIN session is invalid or expired. Please verify PIN again.", 401);
+  }
+
+  if (session.caseId !== activePin.caseId) {
+    throw new DomainError("PIN session does not match this case.", 401);
+  }
+
+  if (
+    normalizeIdentifier(session.participantEmail) !== normalizeIdentifier(activePin.client.email)
+  ) {
+    throw new DomainError("PIN session does not match this participant.", 401);
+  }
+}
+
 export async function POST(request: Request) {
   try {
     const json = await request.json();
     const payload = formSubmissionSchema.parse(json);
     const metadata = payload.metadata || payload.answersMetadata || {};
     const normalizedFormType = payload.formType.trim().toUpperCase();
+
+    await assertPinGateIfRequired({
+      formType: normalizedFormType,
+      participantIdentifier: payload.participantIdentifier,
+      caseId: payload.caseId,
+      caseReference: payload.caseReference,
+      accessKey: payload.accessKey,
+    });
 
     if (normalizedFormType === AVAILABILITY_SUBMISSION_FORM_TYPE) {
       const windowsValue = (metadata as { windows?: unknown }).windows;

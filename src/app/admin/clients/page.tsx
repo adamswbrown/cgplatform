@@ -20,7 +20,8 @@ export default async function AdminClientsPage() {
         { href: "/admin/clients", label: "All Clients" },
         { href: "/admin/specialists", label: "Specialists" },
         { href: "/admin/workflows", label: "Workflows" },
-        { href: "/intake", label: "Public Intake" },
+        { href: "/admin/settings/intake", label: "Intake Settings" },
+        { href: "/intake", label: "Secure Intake" },
       ]}
     >
       <section className="overflow-hidden rounded-2xl border border-[color:var(--border)] bg-[color:var(--surface)] shadow-sm">

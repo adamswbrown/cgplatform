@@ -1,7 +1,11 @@
 import bcrypt from "bcryptjs";
+import { createHash } from "crypto";
+import fs from "node:fs/promises";
+import path from "node:path";
 import { PrismaClient, CaseStatus, DocumentState, SessionStatus, UserRole } from "@prisma/client";
 
 const prisma = new PrismaClient();
+const USER_SEED_FILE = path.join(process.cwd(), "prisma", "seed.user.json");
 
 function addDays(date, days) {
   const value = new Date(date);
@@ -15,9 +19,493 @@ function addHours(date, hours) {
   return value;
 }
 
+function formPinSecret() {
+  return process.env.FORM_PIN_SECRET || process.env.AUTH_SECRET || "dev-form-pin-secret";
+}
+
+function hashPin(accessKey, pin) {
+  return createHash("sha256")
+    .update(`pin|${formPinSecret()}|${accessKey}|${pin}`)
+    .digest("hex");
+}
+
+function normalizeEmail(value) {
+  return String(value || "")
+    .trim()
+    .toLowerCase();
+}
+
+function parseDateOrDefault(value, fallback) {
+  if (!value) {
+    return fallback;
+  }
+
+  const parsed = new Date(String(value));
+  return Number.isNaN(parsed.getTime()) ? fallback : parsed;
+}
+
+function toCaseStatus(value, fallback = CaseStatus.NEW) {
+  const normalized = String(value || "")
+    .trim()
+    .toUpperCase();
+  return Object.values(CaseStatus).includes(normalized) ? normalized : fallback;
+}
+
+function toSessionStatus(value, fallback = SessionStatus.SCHEDULED) {
+  const normalized = String(value || "")
+    .trim()
+    .toUpperCase();
+  return Object.values(SessionStatus).includes(normalized) ? normalized : fallback;
+}
+
+function toDocumentState(value, fallback = DocumentState.SENT) {
+  const normalized = String(value || "")
+    .trim()
+    .toUpperCase();
+  return Object.values(DocumentState).includes(normalized) ? normalized : fallback;
+}
+
+function buildDefaultClientFromEmail(email) {
+  const localPart = String(email).split("@")[0] || "seed";
+  const normalized = localPart
+    .replace(/[^a-zA-Z0-9]+/g, " ")
+    .trim();
+  const [first, ...rest] = normalized.split(/\s+/).filter(Boolean);
+  return {
+    firstName: first ? first.charAt(0).toUpperCase() + first.slice(1) : "Seed",
+    lastName: rest.length > 0 ? rest.join(" ") : "Client",
+  };
+}
+
+async function loadUserSeedConfig() {
+  try {
+    const raw = await fs.readFile(USER_SEED_FILE, "utf8");
+    const parsed = JSON.parse(raw);
+
+    return {
+      clients: Array.isArray(parsed.clients) ? parsed.clients : [],
+      cases: Array.isArray(parsed.cases) ? parsed.cases : [],
+      formPins: Array.isArray(parsed.formPins) ? parsed.formPins : [],
+    };
+  } catch (error) {
+    if (error && typeof error === "object" && error.code === "ENOENT") {
+      return null;
+    }
+
+    throw error;
+  }
+}
+
+async function applyUserSeedConfig(input) {
+  const {
+    config,
+    generalWorkflow,
+    couplesWorkflow,
+    generalSteps,
+    couplesSteps,
+    specialistsByEmail,
+    documentTemplatesByCode,
+    opsUser,
+  } = input;
+
+  if (!config) {
+    return {
+      customCases: [],
+      customPins: [],
+      loaded: false,
+    };
+  }
+
+  const workflowByCode = new Map([
+    [generalWorkflow.code, generalWorkflow],
+    [couplesWorkflow.code, couplesWorkflow],
+  ]);
+  const stepsByTemplateId = new Map([
+    [generalWorkflow.id, generalSteps],
+    [couplesWorkflow.id, couplesSteps],
+  ]);
+
+  const clientsByEmail = new Map();
+  const existingClients = await prisma.client.findMany({
+    select: {
+      id: true,
+      firstName: true,
+      lastName: true,
+      email: true,
+      phone: true,
+    },
+  });
+  for (const client of existingClients) {
+    clientsByEmail.set(normalizeEmail(client.email), client);
+  }
+
+  async function ensureClientByEmail(entry) {
+    const email = normalizeEmail(entry.email);
+    if (!email) {
+      return null;
+    }
+
+    const existing = clientsByEmail.get(email);
+    if (existing) {
+      return existing;
+    }
+
+    const fallback = buildDefaultClientFromEmail(email);
+    const created = await prisma.client.create({
+      data: {
+        firstName: String(entry.firstName || fallback.firstName).trim() || fallback.firstName,
+        lastName: String(entry.lastName || fallback.lastName).trim() || fallback.lastName,
+        email,
+        phone: entry.phone ? String(entry.phone).trim() : null,
+      },
+    });
+    clientsByEmail.set(email, created);
+    return created;
+  }
+
+  for (const clientSeed of config.clients) {
+    if (!clientSeed || typeof clientSeed !== "object") {
+      continue;
+    }
+    await ensureClientByEmail(clientSeed);
+  }
+
+  const customCases = [];
+  const customPins = [];
+  const now = new Date();
+
+  async function createPinRecord({
+    caseId,
+    caseReference,
+    participantEmail,
+    formType,
+    formPath,
+    accessKey,
+    pin,
+    expiresInDays,
+    maxAttempts,
+  }) {
+    const participant = clientsByEmail.get(normalizeEmail(participantEmail));
+    if (!participant) {
+      console.warn(
+        `[seed.user] skipped PIN for ${participantEmail} (${formType}) on ${caseReference}: participant not found`,
+      );
+      return;
+    }
+
+    const normalizedFormType = String(formType || "")
+      .trim()
+      .toUpperCase();
+    if (!normalizedFormType) {
+      return;
+    }
+
+    const normalizedPath = String(formPath || "").trim() || "/forms/terms-and-conditions";
+    const normalizedAccessKey = String(accessKey || "").trim();
+    const normalizedPin = String(pin || "")
+      .replace(/\D+/g, "")
+      .padStart(6, "0")
+      .slice(0, 6);
+
+    if (!normalizedAccessKey || !normalizedPin) {
+      return;
+    }
+
+    const expiryDays = Number.isFinite(expiresInDays) ? Number(expiresInDays) : 30;
+    const safeMaxAttempts = Number.isFinite(maxAttempts) ? Math.max(1, Number(maxAttempts)) : 8;
+    const expiresAt = addDays(now, expiryDays);
+
+    await prisma.formAccessPin.create({
+      data: {
+        caseId,
+        clientId: participant.id,
+        formType: normalizedFormType,
+        formPath: normalizedPath,
+        accessKey: normalizedAccessKey,
+        pinHash: hashPin(normalizedAccessKey, normalizedPin),
+        expiresAt,
+        maxAttempts: safeMaxAttempts,
+        metadata: {
+          source: "seed.user",
+        },
+        issuedByUserId: opsUser.id,
+      },
+    });
+
+    customPins.push({
+      caseReference,
+      participantEmail: participant.email,
+      formType: normalizedFormType,
+      accessKey: normalizedAccessKey,
+      pin: normalizedPin,
+    });
+  }
+
+  for (const caseSeed of config.cases) {
+    if (!caseSeed || typeof caseSeed !== "object") {
+      continue;
+    }
+
+    const reference = String(caseSeed.reference || "").trim();
+    if (!reference) {
+      console.warn("[seed.user] skipped case without reference");
+      continue;
+    }
+
+    const participantEmails = Array.isArray(caseSeed.participants)
+      ? caseSeed.participants.map((value) => normalizeEmail(value)).filter(Boolean)
+      : [];
+
+    if (participantEmails.length === 0 || participantEmails.length > 2) {
+      console.warn(
+        `[seed.user] skipped case ${reference}: provide 1 or 2 participant emails in 'participants'`,
+      );
+      continue;
+    }
+
+    const participantClients = [];
+    for (const participantEmail of participantEmails) {
+      const client = await ensureClientByEmail({ email: participantEmail });
+      if (client) {
+        participantClients.push(client);
+      }
+    }
+
+    if (participantClients.length !== participantEmails.length) {
+      console.warn(`[seed.user] skipped case ${reference}: unable to resolve participants`);
+      continue;
+    }
+
+    const counsellingType =
+      String(caseSeed.counsellingType || "")
+        .trim()
+        .toLowerCase() || (participantClients.length === 2 ? "couples" : "individual");
+    const workflowCode = String(caseSeed.workflowCode || "")
+      .trim()
+      .toUpperCase();
+    const workflowTemplate =
+      workflowByCode.get(workflowCode) ||
+      (counsellingType.includes("couple") ? couplesWorkflow : generalWorkflow);
+    const assignedSpecialist = caseSeed.assignedSpecialistEmail
+      ? specialistsByEmail.get(normalizeEmail(caseSeed.assignedSpecialistEmail)) || null
+      : null;
+
+    const existingCase = await prisma.case.findUnique({
+      where: { reference },
+      select: {
+        id: true,
+        reference: true,
+      },
+    });
+    const caseRecord =
+      existingCase ||
+      (await prisma.case.create({
+        data: {
+          reference,
+          status: toCaseStatus(caseSeed.status, CaseStatus.NEW),
+          counsellingType,
+          intakeSource: String(caseSeed.intakeSource || "CUSTOM_SEED"),
+          intakeExternalId: caseSeed.intakeExternalId ? String(caseSeed.intakeExternalId) : null,
+          intakeReceivedAt: parseDateOrDefault(caseSeed.intakeReceivedAt, now),
+          caseWorkflowTemplateId: workflowTemplate?.id || null,
+          notes: caseSeed.notes ? String(caseSeed.notes) : null,
+          flags: Array.isArray(caseSeed.flags)
+            ? caseSeed.flags.map((flag) => String(flag).trim()).filter(Boolean)
+            : [],
+          assignedSpecialistId: assignedSpecialist?.id || null,
+          participants: {
+            create: participantClients.map((client, index) => ({
+              clientId: client.id,
+              role: index === 0 ? "PRIMARY" : "SECONDARY",
+            })),
+          },
+        },
+      }));
+
+    const templateSteps = stepsByTemplateId.get(workflowTemplate.id) || [];
+    if (templateSteps.length > 0) {
+      await prisma.caseWorkflowState.createMany({
+        data: templateSteps.map((step) => ({
+          caseId: caseRecord.id,
+          stepId: step.id,
+          status: "PENDING",
+        })),
+      });
+    }
+
+    const completedFormTypes = Array.isArray(caseSeed.completedFormTypes)
+      ? caseSeed.completedFormTypes.map((formType) => String(formType).trim().toUpperCase())
+      : [];
+    for (const step of templateSteps) {
+      if (!step.formType || !completedFormTypes.includes(step.formType)) {
+        continue;
+      }
+
+      await prisma.caseWorkflowState.updateMany({
+        where: {
+          caseId: caseRecord.id,
+          stepId: step.id,
+        },
+        data: {
+          status: "COMPLETED",
+          completedAt: now,
+          metadata: {
+            source: "seed.user",
+            formType: step.formType,
+          },
+        },
+      });
+    }
+
+    if (Array.isArray(caseSeed.documents)) {
+      for (const documentSeed of caseSeed.documents) {
+        const code = String(documentSeed.code || "")
+          .trim()
+          .toUpperCase();
+        const template = documentTemplatesByCode[code];
+        if (!template) {
+          continue;
+        }
+
+        const status = toDocumentState(documentSeed.status, DocumentState.SENT);
+        const sentAt = parseDateOrDefault(documentSeed.sentAt, now);
+        const completedAt =
+          status === DocumentState.COMPLETED
+            ? parseDateOrDefault(documentSeed.completedAt, now)
+            : null;
+
+        await prisma.documentInstance.create({
+          data: {
+            caseId: caseRecord.id,
+            templateId: template.id,
+            status,
+            sentAt,
+            completedAt,
+            required:
+              typeof documentSeed.required === "boolean" ? Boolean(documentSeed.required) : true,
+          },
+        });
+      }
+    }
+
+    if (caseSeed.session && typeof caseSeed.session === "object") {
+      const sessionSpecialist =
+        (caseSeed.session.specialistEmail &&
+          specialistsByEmail.get(normalizeEmail(caseSeed.session.specialistEmail))) ||
+        assignedSpecialist;
+
+      if (sessionSpecialist) {
+        const defaultStart = addDays(now, 3);
+        defaultStart.setHours(10, 0, 0, 0);
+        const startTime = parseDateOrDefault(caseSeed.session.startTime, defaultStart);
+        let endTime = parseDateOrDefault(caseSeed.session.endTime, addHours(startTime, 1));
+        if (endTime <= startTime) {
+          endTime = addHours(startTime, 1);
+        }
+
+        await prisma.session.create({
+          data: {
+            caseId: caseRecord.id,
+            specialistId: sessionSpecialist.id,
+            status: toSessionStatus(caseSeed.session.status, SessionStatus.SCHEDULED),
+            providerBookingId:
+              String(caseSeed.session.providerBookingId || "").trim() ||
+              `fake-custom-${reference.toLowerCase()}`,
+            providerStartTime: startTime,
+            providerEndTime: endTime,
+            providerType: String(caseSeed.session.providerType || "fake"),
+            providerStatus: String(caseSeed.session.providerStatus || "scheduled"),
+            lastProviderSyncAt: now,
+            notes: caseSeed.session.notes ? String(caseSeed.session.notes) : null,
+          },
+        });
+      }
+    }
+
+    if (Array.isArray(caseSeed.pins)) {
+      for (const pinSeed of caseSeed.pins) {
+        await createPinRecord({
+          caseId: caseRecord.id,
+          caseReference: caseRecord.reference,
+          participantEmail: pinSeed.participantEmail,
+          formType: pinSeed.formType,
+          formPath: pinSeed.formPath,
+          accessKey: pinSeed.accessKey,
+          pin: pinSeed.pin,
+          expiresInDays: pinSeed.expiresInDays,
+          maxAttempts: pinSeed.maxAttempts,
+        });
+      }
+    }
+
+    await prisma.auditLog.create({
+      data: {
+        caseId: caseRecord.id,
+        userId: opsUser.id,
+        action: "SEED_USER_CASE_CREATED",
+        details: {
+          reference: caseRecord.reference,
+          counsellingType,
+        },
+      },
+    });
+
+    customCases.push({
+      reference: caseRecord.reference,
+      counsellingType,
+      participants: participantClients.map((client) => client.email),
+    });
+  }
+
+  for (const pinSeed of config.formPins) {
+    if (!pinSeed || typeof pinSeed !== "object") {
+      continue;
+    }
+
+    const caseReference = String(pinSeed.caseReference || "").trim();
+    const caseRecord = caseReference
+      ? await prisma.case.findUnique({
+          where: { reference: caseReference },
+          select: {
+            id: true,
+            reference: true,
+          },
+        })
+      : null;
+
+    if (!caseRecord) {
+      console.warn(
+        `[seed.user] skipped top-level form pin for ${pinSeed.participantEmail || "unknown"}: caseReference not found`,
+      );
+      continue;
+    }
+
+    await createPinRecord({
+      caseId: caseRecord.id,
+      caseReference: caseRecord.reference,
+      participantEmail: pinSeed.participantEmail,
+      formType: pinSeed.formType,
+      formPath: pinSeed.formPath,
+      accessKey: pinSeed.accessKey,
+      pin: pinSeed.pin,
+      expiresInDays: pinSeed.expiresInDays,
+      maxAttempts: pinSeed.maxAttempts,
+    });
+  }
+
+  return {
+    customCases,
+    customPins,
+    loaded: true,
+  };
+}
+
 async function main() {
   await prisma.authSession.deleteMany();
+  await prisma.systemSetting.deleteMany();
   await prisma.auditLog.deleteMany();
+  await prisma.formAccessPin.deleteMany();
+  await prisma.intakeAccessInvite.deleteMany();
   await prisma.documentInstance.deleteMany();
   await prisma.session.deleteMany();
   await prisma.caseAvailabilityWindow.deleteMany();
@@ -37,8 +525,8 @@ async function main() {
       {
         code: "TERMS_AND_CONDITIONS",
         name: "Terms & Conditions",
-        description: "Required before agreement progression.",
-        triggerStatus: CaseStatus.NEW,
+        description: "Issued after scheduling and required before session begins.",
+        triggerStatus: CaseStatus.SCHEDULED,
         required: true,
       },
       {
@@ -70,6 +558,73 @@ async function main() {
         required: true,
       },
     ],
+  });
+
+  await prisma.systemSetting.create({
+    data: {
+      key: "intake_form_content",
+      value: {
+        crisisModal: {
+          title: "Immediate Support",
+          intro:
+            "If you are feeling vulnerable in the meantime please contact one of the following services:",
+          contacts: [
+            {
+              label: "LIFELINE",
+              phone: "0808 808 8000",
+              description:
+                "Lifeline is a crisis response helpline service for people who are experiencing distress or despair.",
+            },
+            {
+              label: "PREMIER LIFELINE (Christian)",
+              phone: "0300 111 0101",
+              description: "",
+            },
+            {
+              label: "SAMARITANS",
+              phone: "0330 094 5717",
+              description: "",
+            },
+            {
+              label: "YOUR GP",
+              phone: "",
+              description: "",
+            },
+            {
+              label: "Emergency",
+              phone: "999",
+              description: "In an immediate emergency call 999.",
+            },
+          ],
+        },
+        availability: {
+          heading: "Your Availability",
+          subheading:
+            "The more available you are the sooner you could be allocated to a Counsellor.",
+          notes: [
+            {
+              title: "EVENING SESSIONS",
+              body:
+                "There are limited in-person appointments on Tuesday and Thursday evenings in Newtownards.",
+            },
+            {
+              title: "COUPLES COUNSELLING",
+              body:
+                "We have very limited availability for couples counselling on Tuesday evenings and unfortunately no couples counselling is available on Thursday evenings.",
+            },
+            {
+              title: "SESSION TIMES",
+              body:
+                "Sessions do not commence before 9.30am and our last appointment on Tuesday or Thursdays is no later than 8.00pm.",
+            },
+          ],
+          disclaimer:
+            "We will endeavour to accommodate your request but this may not always be possible.",
+          prompt:
+            "Please list the days and times you are available (plus any other information regarding your availability).",
+        },
+      },
+    },
   });
 
   const [soloSpecialist, couplesSpecialist, backupSpecialist] = await Promise.all([
@@ -211,8 +766,8 @@ async function main() {
     },
     {
       templateId: generalWorkflow.id,
-      name: "Terms & conditions",
-      formType: "TERMS_AND_CONDITIONS",
+      name: "Availability submission",
+      formType: "AVAILABILITY_SUBMISSION",
       type: "FORM",
       required: true,
       blocksScheduling: true,
@@ -220,11 +775,11 @@ async function main() {
     },
     {
       templateId: generalWorkflow.id,
-      name: "Availability submission",
-      formType: "AVAILABILITY_SUBMISSION",
+      name: "Terms & conditions",
+      formType: "TERMS_AND_CONDITIONS",
       type: "FORM",
       required: true,
-      blocksScheduling: true,
+      blocksScheduling: false,
       sortOrder: 30,
     },
   ];
@@ -265,6 +820,15 @@ async function main() {
       required: true,
       blocksScheduling: true,
       sortOrder: 40,
+    },
+    {
+      templateId: couplesWorkflow.id,
+      name: "Terms & conditions (both participants)",
+      formType: "TERMS_AND_CONDITIONS",
+      type: "FORM",
+      required: true,
+      blocksScheduling: false,
+      sortOrder: 50,
     },
   ];
 
@@ -406,21 +970,123 @@ async function main() {
     },
   });
 
-  await prisma.documentInstance.create({
-    data: {
-      caseId: coupleCase.id,
-      templateId: byCode.TERMS_AND_CONDITIONS.id,
-      status: DocumentState.SENT,
-      required: true,
-    },
-  });
-
   await prisma.caseWorkflowState.createMany({
     data: couplesSteps.map((step) => ({
       caseId: coupleCase.id,
       stepId: step.id,
       status: "PENDING",
     })),
+  });
+
+  const seededFormPins = [
+    {
+      accessKey: "seed-terms-case-1001",
+      pin: "111111",
+      caseId: singleCase.id,
+      caseReference: singleCase.reference,
+      clientId: singleClient.id,
+      participantLabel: `${singleClient.firstName} ${singleClient.lastName}`,
+      participantEmail: singleClient.email,
+      formType: "TERMS_AND_CONDITIONS",
+      formPath: "/forms/terms-and-conditions",
+      expiresAt: addDays(new Date(), 30),
+      maxAttempts: 8,
+    },
+    {
+      accessKey: "seed-outtake-case-1001",
+      pin: "222222",
+      caseId: singleCase.id,
+      caseReference: singleCase.reference,
+      clientId: singleClient.id,
+      participantLabel: `${singleClient.firstName} ${singleClient.lastName}`,
+      participantEmail: singleClient.email,
+      formType: "OUTTAKE_FORM",
+      formPath: "/forms/outtake",
+      expiresAt: addDays(new Date(), 30),
+      maxAttempts: 8,
+    },
+    {
+      accessKey: "seed-consent-case-1002-a",
+      pin: "333333",
+      caseId: coupleCase.id,
+      caseReference: coupleCase.reference,
+      clientId: coupleA.id,
+      participantLabel: `${coupleA.firstName} ${coupleA.lastName}`,
+      participantEmail: coupleA.email,
+      formType: "CONSENT_FORM",
+      formPath: "/forms/consent",
+      expiresAt: addDays(new Date(), 30),
+      maxAttempts: 8,
+    },
+    {
+      accessKey: "seed-consent-case-1002-b",
+      pin: "444444",
+      caseId: coupleCase.id,
+      caseReference: coupleCase.reference,
+      clientId: coupleB.id,
+      participantLabel: `${coupleB.firstName} ${coupleB.lastName}`,
+      participantEmail: coupleB.email,
+      formType: "CONSENT_FORM",
+      formPath: "/forms/consent",
+      expiresAt: addDays(new Date(), 30),
+      maxAttempts: 8,
+    },
+    {
+      accessKey: "seed-agreement-case-1002-a",
+      pin: "555555",
+      caseId: coupleCase.id,
+      caseReference: coupleCase.reference,
+      clientId: coupleA.id,
+      participantLabel: `${coupleA.firstName} ${coupleA.lastName}`,
+      participantEmail: coupleA.email,
+      formType: "AGREEMENT_FORM",
+      formPath: "/forms/agreement",
+      expiresAt: addDays(new Date(), 30),
+      maxAttempts: 8,
+    },
+  ];
+
+  const seededIntakeInvite = {
+    accessKey: "seed-intake-primary-2001",
+    pin: "778899",
+    recipientEmail: "intake.prospect@example.com",
+    recipientName: "Intake Prospect",
+    expiresAt: addDays(new Date(), 14),
+    maxAttempts: 8,
+  };
+
+  await prisma.formAccessPin.createMany({
+    data: seededFormPins.map((entry) => ({
+      caseId: entry.caseId,
+      clientId: entry.clientId,
+      formType: entry.formType,
+      formPath: entry.formPath,
+      accessKey: entry.accessKey,
+      pinHash: hashPin(entry.accessKey, entry.pin),
+      expiresAt: entry.expiresAt,
+      maxAttempts: entry.maxAttempts,
+      metadata: {
+        source: "seed",
+        note: "Deterministic local test PIN",
+      },
+      issuedByUserId: opsUser.id,
+    })),
+  });
+
+  await prisma.intakeAccessInvite.create({
+    data: {
+      recipientEmail: seededIntakeInvite.recipientEmail,
+      recipientName: seededIntakeInvite.recipientName,
+      accessKey: seededIntakeInvite.accessKey,
+      pinHash: hashPin(seededIntakeInvite.accessKey, seededIntakeInvite.pin),
+      expiresAt: seededIntakeInvite.expiresAt,
+      maxAttempts: seededIntakeInvite.maxAttempts,
+      metadata: {
+        source: "seed",
+        note: "Deterministic secure intake invite",
+      },
+      issuedByUserId: opsUser.id,
+    },
   });
 
   await prisma.auditLog.createMany({
@@ -441,7 +1107,36 @@ async function main() {
           note: "Seeded as NEW couple case pending Cal.com match",
         },
       },
+      ...seededFormPins.map((entry) => ({
+        caseId: entry.caseId,
+        userId: opsUser.id,
+        action: "SEED_FORM_PIN_CREATED",
+        details: {
+          formType: entry.formType,
+          formPath: entry.formPath,
+          accessKey: entry.accessKey,
+          participantEmail: entry.participantEmail,
+          pin: entry.pin,
+          expiresAt: entry.expiresAt.toISOString(),
+        },
+      })),
     ],
+  });
+
+  const userSeedConfig = await loadUserSeedConfig();
+  const userSeedResult = await applyUserSeedConfig({
+    config: userSeedConfig,
+    generalWorkflow,
+    couplesWorkflow,
+    generalSteps,
+    couplesSteps,
+    specialistsByEmail: new Map([
+      [normalizeEmail(soloSpecialist.email), soloSpecialist],
+      [normalizeEmail(couplesSpecialist.email), couplesSpecialist],
+      [normalizeEmail(backupSpecialist.email), backupSpecialist],
+    ]),
+    documentTemplatesByCode: byCode,
+    opsUser,
   });
 
   console.log("Seed completed.");
@@ -449,6 +1144,41 @@ async function main() {
   console.log("  OPS: ops@demo.local / password123");
   console.log("  Specialist: avery.specialist@demo.local / password123");
   console.log("  Specialist: jordan.specialist@demo.local / password123");
+  console.log("Seeded cases:");
+  console.log("  CASE-1001: Individual, scheduled (Taylor Ng)");
+  console.log("  CASE-1002: Couples, new/pending (Chris Diaz + Robin Diaz)");
+  const localBaseUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3001";
+  console.log("Seeded secure intake access:");
+  console.log(
+    `  ${seededIntakeInvite.recipientName} <${seededIntakeInvite.recipientEmail}> | PIN ${seededIntakeInvite.pin} | ${localBaseUrl}/intake/access/${seededIntakeInvite.accessKey}`,
+  );
+  console.log("Seeded form PIN test data:");
+  for (const entry of seededFormPins) {
+    console.log(
+      `  ${entry.caseReference} | ${entry.formType} | ${entry.participantLabel} <${entry.participantEmail}> | PIN ${entry.pin} | ${localBaseUrl}/forms/access/${entry.accessKey}`,
+    );
+  }
+  if (userSeedResult.loaded) {
+    console.log(`Custom user seed loaded from ${USER_SEED_FILE}`);
+    if (userSeedResult.customCases.length > 0) {
+      console.log("Custom seeded cases:");
+      for (const customCase of userSeedResult.customCases) {
+        console.log(
+          `  ${customCase.reference} | ${customCase.counsellingType} | ${customCase.participants.join(", ")}`,
+        );
+      }
+    }
+    if (userSeedResult.customPins.length > 0) {
+      console.log("Custom seeded form PINs:");
+      for (const pin of userSeedResult.customPins) {
+        console.log(
+          `  ${pin.caseReference} | ${pin.formType} | ${pin.participantEmail} | PIN ${pin.pin} | ${localBaseUrl}/forms/access/${pin.accessKey}`,
+        );
+      }
+    }
+  } else {
+    console.log(`No custom seed file found at ${USER_SEED_FILE}.`);
+  }
 }
 
 main()

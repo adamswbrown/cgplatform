@@ -20,10 +20,6 @@ export const CASE_TRANSITIONS: Record<CaseStatus, CaseStatus[]> = {
 };
 
 export const REQUIRED_DOCUMENTS_TO_ENTER: Partial<Record<CaseStatus, string[]>> = {
-  [CaseStatus.READY_TO_SCHEDULE]: [
-    DOCUMENT_CODES.TERMS_AND_CONDITIONS,
-    DOCUMENT_CODES.CONTRACT,
-  ],
-  [CaseStatus.IN_SESSION]: [DOCUMENT_CODES.INTAKE_FORM],
+  [CaseStatus.IN_SESSION]: [DOCUMENT_CODES.TERMS_AND_CONDITIONS],
   [CaseStatus.CLOSED]: [DOCUMENT_CODES.OUTTAKE_FORM],
 };

@@ -95,6 +95,7 @@ async function createCaseViaApi(
     secondary?: { firstName: string; lastName: string; email: string; phone?: string };
     counsellingType?: string;
     notes?: string;
+    initialStatus?: string;
     requestedDurationMinutes?: number;
     autoAllocate?: boolean;
   },
@@ -239,6 +240,10 @@ function nonOverlappingCoupleWindows(variant: "primary" | "secondary") {
   return [buildAvailabilityWindow(2, 15, 16), buildAvailabilityWindow(3, 15, 16)];
 }
 
+function broadCoupleWindows(dayOffset: number) {
+  return [buildAvailabilityWindow(dayOffset, 9, 17), buildAvailabilityWindow(dayOffset + 1, 9, 17)];
+}
+
 async function completeRequiredFormsForCase(
   page: Page,
   caseId: string,
@@ -264,14 +269,14 @@ async function completeRequiredFormsForCase(
     });
   }
 
-  await submitFormForCase(page, {
-    caseId,
-    participantIdentifier: participants.primaryIdentifier,
-    formType: participantType === "single" ? "TERMS_AND_CONDITIONS" : "AGREEMENT_FORM",
-    source: "playwright",
-  });
-
   if (participantType === "couple") {
+    await submitFormForCase(page, {
+      caseId,
+      participantIdentifier: participants.primaryIdentifier,
+      formType: "AGREEMENT_FORM",
+      source: "playwright",
+    });
+
     await submitFormForCase(page, {
       caseId,
       participantIdentifier: participants.primaryIdentifier,
@@ -341,29 +346,18 @@ async function overrideCaseViaApi(page: Page, caseId: string, specialistId: stri
 
 test("intake to closed case smoke flow", async ({ page }) => {
   const unique = Date.now();
-
-  await page.goto("/intake");
-
   const primaryEmail = `smoke-${unique}@example.com`;
-  await page.fill('input[name="primaryFirstName"]', "Smoke");
-  await page.fill('input[name="primaryLastName"]', `Test${unique}`);
-  await page.fill('input[name="primaryEmail"]', primaryEmail);
-  await page.fill('textarea[name="notes"]', "Playwright smoke flow");
-
-  await Promise.all([
-    page.waitForURL((url) => url.pathname === "/intake/success"),
-    page.getByRole("button", { name: "Submit intake" }).click(),
-  ]);
-
-  await expect(page.getByRole("heading", { name: "Intake submitted" })).toBeVisible();
-
-  const successUrl = new URL(page.url());
-  const caseId = successUrl.searchParams.get("caseId");
-
-  expect(caseId).toBeTruthy();
-  if (!caseId) {
-    throw new Error("Case ID missing in intake success URL.");
-  }
+  const created = await createCaseViaApi(page, {
+    primary: {
+      firstName: "Smoke",
+      lastName: `Test${unique}`,
+      email: primaryEmail,
+    },
+    notes: "Playwright smoke flow",
+    initialStatus: "AWAITING_REVIEW",
+    autoAllocate: false,
+  });
+  const caseId = created.caseId;
 
   await loginAsOps(page);
   await page.goto(`/admin/cases/${caseId}`);
@@ -443,6 +437,269 @@ test("client dashboards are role scoped", async ({ page }) => {
   await expect(page.getByRole("heading", { name: "My Clients" })).toBeVisible();
   await expect(page.getByText("Taylor Ng")).toBeVisible();
   await expect(page.getByText("Chris Diaz")).toHaveCount(0);
+});
+
+test("PIN-gated secure forms require verification before submission", async ({ page }) => {
+  await loginAsOps(page);
+
+  const primaryEmail = `pin-gated-${Date.now()}@example.com`;
+  const created = await createCaseViaApi(page, {
+    counsellingType: "individual",
+    primary: {
+      firstName: "Pin",
+      lastName: "Guarded",
+      email: primaryEmail,
+    },
+    autoAllocate: false,
+  });
+
+  await completeBlockingFormsForCase(
+    page,
+    created.caseId,
+    { primaryIdentifier: primaryEmail },
+    "single",
+  );
+  await allocateCaseViaApi(page, created.caseId);
+
+  const issued = await postJsonFromBrowser(page, "/api/forms/access/issue", {
+    caseId: created.caseId,
+    participantIdentifier: primaryEmail,
+    formType: "TERMS_AND_CONDITIONS",
+    formPath: "/forms/terms-and-conditions",
+    expiresInHours: 24,
+    sendEmail: false,
+  });
+  expect(issued.ok).toBe(true);
+
+  const issuedJson = issued.json as {
+    ok: boolean;
+    data: {
+      accessKey: string;
+      pin: string;
+    };
+  };
+  expect(issuedJson.ok).toBe(true);
+  expect(issuedJson.data.accessKey).toBeTruthy();
+  expect(issuedJson.data.pin).toHaveLength(6);
+
+  const blockedSubmission = await page.request.post("/forms/submission", {
+    data: {
+      formType: "TERMS_AND_CONDITIONS",
+      caseId: created.caseId,
+      participantIdentifier: primaryEmail,
+      source: "playwright",
+      metadata: {
+        accepted: true,
+      },
+    },
+  });
+  expect(blockedSubmission.status()).toBe(401);
+
+  await page.goto(`/forms/terms-and-conditions?accessKey=${issuedJson.data.accessKey}`);
+  await expect(page).toHaveURL(new RegExp(`/forms/access/${issuedJson.data.accessKey}`));
+
+  await page.fill("#pin", "000000");
+  await page.getByRole("button", { name: "Continue" }).click();
+  await expect(page.getByText("Invalid PIN.")).toBeVisible();
+
+  await page.fill("#pin", issuedJson.data.pin);
+  await page.getByRole("button", { name: "Continue" }).click();
+
+  await page.waitForURL((url) => {
+    return (
+      url.pathname === "/forms/terms-and-conditions" &&
+      url.searchParams.get("accessKey") === issuedJson.data.accessKey
+    );
+  });
+
+  await expect(page.getByRole("heading", { name: "Terms of Counselling", exact: true })).toBeVisible();
+  await page.check("#terms-accepted");
+  await page.check("#terms-data-policy");
+  await page.fill("#terms-printed-name", "Pin Guarded");
+  await page.fill("#terms-signature-typed", "Pin Guarded");
+  await page.getByRole("button", { name: "Submit" }).click();
+  await expect(page.getByText("Thank you. Your terms response has been recorded.")).toBeVisible();
+});
+
+test("secure intake requires issued access link and PIN", async ({ page }) => {
+  await page.goto("/intake");
+  await expect(page.getByRole("heading", { name: "Secure Access Required" })).toBeVisible();
+  await expect(page.getByText("This intake form is not public.")).toBeVisible();
+
+  await loginAsOps(page);
+
+  const intakeEmail = `secure-intake-${Date.now()}@example.com`;
+  const issued = await postJsonFromBrowser(page, "/api/intake/access/issue", {
+    recipientEmail: intakeEmail,
+    recipientName: "Secure Intake Test",
+    expiresInHours: 24,
+    sendEmail: false,
+  });
+  expect(issued.ok).toBe(true);
+
+  const issuedJson = issued.json as {
+    ok: boolean;
+    data: {
+      accessKey: string;
+      pin: string;
+    };
+  };
+  expect(issuedJson.ok).toBe(true);
+  expect(issuedJson.data.accessKey).toBeTruthy();
+  expect(issuedJson.data.pin).toHaveLength(6);
+
+  await page.goto(`/intake/access/${issuedJson.data.accessKey}`);
+  await expect(page.getByRole("heading", { name: "Secure Intake Access" })).toBeVisible();
+
+  await page.fill("#pin", "000000");
+  await page.getByRole("button", { name: "Continue" }).click();
+  await expect(page.getByText("Invalid PIN.")).toBeVisible();
+
+  await page.fill("#pin", issuedJson.data.pin);
+  await page.getByRole("button", { name: "Continue" }).click();
+
+  await page.waitForURL((url) => {
+    return url.pathname === "/intake" && url.searchParams.get("accessKey") === issuedJson.data.accessKey;
+  });
+  await expect(page.getByRole("heading", { name: "Application for Counselling" })).toBeVisible();
+});
+
+test("send form PIN auto-updates form path when form type changes", async ({ page }) => {
+  await loginAsOps(page);
+
+  const primaryEmail = `pin-form-path-${Date.now()}@example.com`;
+  const created = await createCaseViaApi(page, {
+    counsellingType: "individual",
+    primary: {
+      firstName: "Pin",
+      lastName: "Path",
+      email: primaryEmail,
+    },
+    autoAllocate: false,
+  });
+
+  await page.goto(`/admin/cases/${created.caseId}`);
+  const formTypeSelect = page.locator('select[name="formType"]');
+  const formPathInput = page.locator('input[name="formPath"]');
+
+  await expect(formPathInput).toHaveValue("/intake");
+
+  await formTypeSelect.selectOption("TERMS_AND_CONDITIONS");
+  await expect(formPathInput).toHaveValue("/forms/terms-and-conditions");
+
+  await formTypeSelect.selectOption("CONSENT_FORM");
+  await expect(formPathInput).toHaveValue("/forms/consent");
+
+  await formTypeSelect.selectOption("OUTTAKE_FORM");
+  await expect(formPathInput).toHaveValue("/forms/outtake");
+});
+
+test("ops can disable an active form PIN", async ({ page }) => {
+  await loginAsOps(page);
+
+  const primaryEmail = `pin-revoke-${Date.now()}@example.com`;
+  const created = await createCaseViaApi(page, {
+    counsellingType: "individual",
+    primary: {
+      firstName: "Pin",
+      lastName: "Disable",
+      email: primaryEmail,
+    },
+    autoAllocate: false,
+  });
+
+  const issued = await postJsonFromBrowser(page, "/api/forms/access/issue", {
+    caseId: created.caseId,
+    participantIdentifier: primaryEmail,
+    formType: "TERMS_AND_CONDITIONS",
+    formPath: "/forms/terms-and-conditions",
+    expiresInHours: 24,
+    sendEmail: false,
+  });
+  expect(issued.ok).toBe(true);
+
+  const issuedJson = issued.json as {
+    ok: boolean;
+    data: {
+      accessKey: string;
+      pin: string;
+    };
+  };
+  expect(issuedJson.ok).toBe(true);
+
+  await page.goto(`/admin/cases/${created.caseId}`);
+  const pinCard = page.locator("li", { hasText: issuedJson.data.accessKey });
+  await expect(pinCard).toBeVisible();
+  await pinCard.getByRole("button", { name: "Disable PIN" }).click();
+
+  await expect(page.getByText("PIN disabled")).toBeVisible();
+  await expect(page.getByText("No active PIN links.")).toBeVisible();
+
+  const verifyAfterDisable = await postJsonFromBrowser(page, "/api/forms/access/verify", {
+    accessKey: issuedJson.data.accessKey,
+    pin: issuedJson.data.pin,
+  });
+  expect(verifyAfterDisable.ok).toBe(false);
+  expect(verifyAfterDisable.status).toBe(410);
+});
+
+test("PIN-gated consent form requires details and records submission", async ({ page }) => {
+  await loginAsOps(page);
+
+  const unique = Date.now();
+  const primaryEmail = `pin-consent-a-${unique}@example.com`;
+  const secondaryEmail = `pin-consent-b-${unique}@example.com`;
+  const created = await createCaseViaApi(page, {
+    counsellingType: "couples",
+    primary: {
+      firstName: "Pin",
+      lastName: "ConsentA",
+      email: primaryEmail,
+    },
+    secondary: {
+      firstName: "Pin",
+      lastName: "ConsentB",
+      email: secondaryEmail,
+    },
+    autoAllocate: false,
+  });
+
+  const issued = await postJsonFromBrowser(page, "/api/forms/access/issue", {
+    caseId: created.caseId,
+    participantIdentifier: primaryEmail,
+    formType: "CONSENT_FORM",
+    formPath: "/forms/consent",
+    expiresInHours: 24,
+    sendEmail: false,
+  });
+  expect(issued.ok).toBe(true);
+
+  const issuedJson = issued.json as {
+    ok: boolean;
+    data: {
+      accessKey: string;
+      pin: string;
+    };
+  };
+  expect(issuedJson.ok).toBe(true);
+
+  await page.goto(`/forms/consent?accessKey=${issuedJson.data.accessKey}`);
+  await expect(page).toHaveURL(new RegExp(`/forms/access/${issuedJson.data.accessKey}`));
+
+  await page.fill("#pin", issuedJson.data.pin);
+  await page.getByRole("button", { name: "Continue" }).click();
+
+  await page.waitForURL((url) => {
+    return url.pathname === "/forms/consent" && url.searchParams.get("accessKey") === issuedJson.data.accessKey;
+  });
+
+  await page.getByRole("checkbox").check();
+  await page.getByRole("button", { name: "Submit" }).click();
+  await expect(page.getByText("Please provide details before submitting.")).toBeVisible();
+
+  await page.fill("#workflow-details", "Consent details from Playwright");
+  await page.getByRole("button", { name: "Submit" }).click();
+  await expect(page.getByText("Thank you. Your consent response has been recorded.")).toBeVisible();
 });
 
 test("one-to-one bookings support 30, 60, 90 minute durations", async ({ page }) => {
@@ -767,6 +1024,18 @@ test("provider prevents booking clashes for one-to-one and many-to-one bookings"
     },
     "couple",
   );
+  await submitAvailabilityForCase(page, {
+    caseId: coupleOne.caseId,
+    participantIdentifier: coupleOneEmailA,
+    windows: broadCoupleWindows(7),
+    timezone: "UTC",
+  });
+  await submitAvailabilityForCase(page, {
+    caseId: coupleOne.caseId,
+    participantIdentifier: coupleOneEmailB,
+    windows: broadCoupleWindows(7),
+    timezone: "UTC",
+  });
   const coupleOneAllocated = await allocateCaseViaApi(page, coupleOne.caseId);
   const coupleOneSession = coupleOneAllocated.sessions[0];
 
@@ -796,6 +1065,18 @@ test("provider prevents booking clashes for one-to-one and many-to-one bookings"
     },
     "couple",
   );
+  await submitAvailabilityForCase(page, {
+    caseId: coupleTwo.caseId,
+    participantIdentifier: coupleTwoEmailA,
+    windows: broadCoupleWindows(7),
+    timezone: "UTC",
+  });
+  await submitAvailabilityForCase(page, {
+    caseId: coupleTwo.caseId,
+    participantIdentifier: coupleTwoEmailB,
+    windows: broadCoupleWindows(7),
+    timezone: "UTC",
+  });
   const coupleTwoAllocated = await overrideCaseViaApi(
     page,
     coupleTwo.caseId,
@@ -869,63 +1150,56 @@ test("external provider cancellation moves case back to ready-to-schedule and wr
   await expect(page.getByText("PROVIDER_CANCELLED")).toBeVisible();
 });
 
-test("terms and conditions must be completed before ready-to-schedule transition", async ({ page }) => {
+test("terms and conditions must be completed after booking before in-session transition", async ({ page }) => {
   await loginAsOps(page);
+  const primaryEmail = `terms-single-${Date.now()}@example.com`;
 
-  const single = await createCaseViaApi(page, {
+  const created = await createCaseViaApi(page, {
     primary: {
       firstName: "Terms",
       lastName: "GateSingle",
-      email: `terms-single-${Date.now()}@example.com`,
+      email: primaryEmail,
     },
     autoAllocate: false,
   });
 
-  const toMatched = await postJsonFromBrowser(page, `/api/cases/${single.caseId}/transition`, {
-    targetStatus: "MATCHED",
-  });
-  expect(toMatched.ok).toBeTruthy();
+  await completeBlockingFormsForCase(
+    page,
+    created.caseId,
+    { primaryIdentifier: primaryEmail },
+    "single",
+  );
+  const allocated = await allocateCaseViaApi(page, created.caseId);
+  expect(allocated.sessions.length).toBeGreaterThan(0);
 
-  const blocked = await postJsonFromBrowser(page, `/api/cases/${single.caseId}/transition`, {
-    targetStatus: "READY_TO_SCHEDULE",
+  const blocked = await postJsonFromBrowser(page, `/api/cases/${created.caseId}/transition`, {
+    targetStatus: "IN_SESSION",
   });
   expect(blocked.status).toBe(409);
-
   const blockedJson = blocked.json as { ok: boolean; error: string };
   expect(blockedJson.ok).toBe(false);
-  expect(blockedJson.error).toContain("Required documents pending");
   expect(blockedJson.error).toContain("TERMS_AND_CONDITIONS");
 
-  const couple = await createCaseViaApi(page, {
-    primary: {
-      firstName: "Terms",
-      lastName: "GateCoupleA",
-      email: `terms-couple-a-${Date.now()}@example.com`,
+  await submitFormForCase(page, {
+    caseId: created.caseId,
+    participantIdentifier: primaryEmail,
+    formType: "TERMS_AND_CONDITIONS",
+    source: "playwright",
+    metadata: {
+      acceptedTerms: true,
+      acceptedDataPolicy: true,
+      printedName: "Terms Gate Single",
+      signedDate: new Date().toISOString().slice(0, 10),
+      signatureType: "typed",
+      signature: "Terms Gate Single",
     },
-    secondary: {
-      firstName: "Terms",
-      lastName: "GateCoupleB",
-      email: `terms-couple-b-${Date.now()}@example.com`,
-    },
-    autoAllocate: false,
   });
 
-  const coupleMatched = await postJsonFromBrowser(page, `/api/cases/${couple.caseId}/transition`, {
-    targetStatus: "MATCHED",
+  const allowed = await postJsonFromBrowser(page, `/api/cases/${created.caseId}/transition`, {
+    targetStatus: "IN_SESSION",
   });
-  expect(coupleMatched.ok).toBeTruthy();
+  expect(allowed.ok).toBe(true);
 
-  const coupleBlocked = await postJsonFromBrowser(
-    page,
-    `/api/cases/${couple.caseId}/transition`,
-    {
-      targetStatus: "READY_TO_SCHEDULE",
-    },
-  );
-  expect(coupleBlocked.status).toBe(409);
-
-  const coupleBlockedJson = coupleBlocked.json as { ok: boolean; error: string };
-  expect(coupleBlockedJson.ok).toBe(false);
-  expect(coupleBlockedJson.error).toContain("Required documents pending");
-  expect(coupleBlockedJson.error).toContain("TERMS_AND_CONDITIONS");
+  await page.goto(`/admin/cases/${created.caseId}`);
+  await expectCurrentStatus(page, "IN_SESSION");
 });

@@ -64,17 +64,17 @@ async function completeBlockingForms(
     },
   });
 
-  await ingestFormSubmission({
-    caseId,
-    participantIdentifier: participants.primaryEmail,
-    formType: type === "single" ? "TERMS_AND_CONDITIONS" : "AGREEMENT_FORM",
-    source: "dev_simulator",
-    metadata: {
-      simulated: true,
-    },
-  });
-
   if (type === "couple") {
+    await ingestFormSubmission({
+      caseId,
+      participantIdentifier: participants.primaryEmail,
+      formType: "AGREEMENT_FORM",
+      source: "dev_simulator",
+      metadata: {
+        simulated: true,
+      },
+    });
+
     await ingestFormSubmission({
       caseId,
       participantIdentifier: participants.secondaryEmail || participants.primaryEmail,

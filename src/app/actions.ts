@@ -25,6 +25,9 @@ import {
   signInWithPassword,
   signOut,
 } from "@/lib/auth";
+import { issueFormPin, issueIntakeAccessInvite, revokeFormPin } from "@/lib/form-access";
+import { updateIntakeFormContent } from "@/lib/intake-settings";
+import { sendFormPinEmail, sendIntakeAccessInviteEmail } from "@/lib/mailer";
 
 const intakeSchema = z
   .object({
@@ -364,6 +367,67 @@ export async function updateSpecialistProfileAction(formData: FormData) {
   redirect(destination);
 }
 
+export async function updateIntakeFormContentAction(formData: FormData) {
+  const user = await requirePageUser([UserRole.OPS]);
+  const redirectTo = String(formData.get("redirectTo") || "/admin/settings/intake");
+
+  const crisisContactsRaw = String(formData.get("crisisContactsJson") || "").trim();
+  const availabilityNotesRaw = String(formData.get("availabilityNotesJson") || "").trim();
+
+  let crisisContacts: unknown[];
+  let availabilityNotes: unknown[];
+
+  try {
+    crisisContacts = JSON.parse(crisisContactsRaw || "[]");
+  } catch {
+    redirect(encodeErrorPath(redirectTo, "Crisis contacts JSON is invalid."));
+  }
+
+  try {
+    availabilityNotes = JSON.parse(availabilityNotesRaw || "[]");
+  } catch {
+    redirect(encodeErrorPath(redirectTo, "Availability notes JSON is invalid."));
+  }
+
+  try {
+    await updateIntakeFormContent(
+      {
+        crisisModal: {
+          title: String(formData.get("crisisTitle") || "").trim(),
+          intro: String(formData.get("crisisIntro") || "").trim(),
+          contacts: crisisContacts as Array<{
+            label: string;
+            phone: string;
+            description: string;
+          }>,
+        },
+        availability: {
+          heading: String(formData.get("availabilityHeading") || "").trim(),
+          subheading: String(formData.get("availabilitySubheading") || "").trim(),
+          notes: availabilityNotes as Array<{
+            title: string;
+            body: string;
+          }>,
+          disclaimer: String(formData.get("availabilityDisclaimer") || "").trim(),
+          prompt: String(formData.get("availabilityPrompt") || "").trim(),
+        },
+      },
+      user.id,
+    );
+  } catch (error) {
+    if (isDomainError(error)) {
+      redirect(encodeErrorPath(redirectTo, error.message));
+    }
+
+    redirect(encodeErrorPath(redirectTo, "Failed to update intake form content."));
+  }
+
+  revalidatePath("/intake");
+  revalidatePath("/intake/success");
+  revalidatePath("/admin/settings/intake");
+  redirect(appendQuery("/admin/settings/intake", "saved", "1"));
+}
+
 export async function assignCaseWorkflowAction(formData: FormData) {
   const user = await requirePageUser([UserRole.OPS]);
   const caseId = String(formData.get("caseId") || "").trim();
@@ -385,6 +449,192 @@ export async function assignCaseWorkflowAction(formData: FormData) {
     revalidatePath("/admin/workflows");
     revalidatePath(redirectTo);
     redirect(redirectTo);
+  } catch (error) {
+    redirect(encodeErrorPath(redirectTo, domainErrorMessage(error)));
+  }
+}
+
+export async function issueFormPinAction(formData: FormData) {
+  const user = await requirePageUser([UserRole.OPS]);
+  const caseId = String(formData.get("caseId") || "").trim();
+  const participantIdentifier = String(formData.get("participantIdentifier") || "").trim();
+  const formType = String(formData.get("formType") || "").trim();
+  const formPath = String(formData.get("formPath") || "").trim();
+  const expiresInHoursRaw = String(formData.get("expiresInHours") || "").trim();
+  const maxAttemptsRaw = String(formData.get("maxAttempts") || "").trim();
+  const sendEmail = String(formData.get("sendEmail") || "") === "on";
+  const redirectTo = String(formData.get("redirectTo") || `/admin/cases/${caseId}`);
+
+  const expiresInHours = expiresInHoursRaw ? Number(expiresInHoursRaw) : undefined;
+  const maxAttempts = maxAttemptsRaw ? Number(maxAttemptsRaw) : undefined;
+
+  if (!caseId || !participantIdentifier || !formType || !formPath) {
+    redirect(
+      encodeErrorPath(
+        redirectTo,
+        "Case, participant, form type, and form path are required to issue a PIN.",
+      ),
+    );
+  }
+
+  let issued:
+    | Awaited<ReturnType<typeof issueFormPin>>
+    | null = null;
+  let emailDelivered = false;
+  let emailError = "";
+
+  try {
+    issued = await issueFormPin({
+      caseId,
+      participantIdentifier,
+      formType,
+      formPath,
+      expiresInHours,
+      maxAttempts,
+      issuedByUserId: user.id,
+      metadata: {
+        issuedFrom: "ops_case_detail",
+      },
+    });
+    if (sendEmail) {
+      try {
+        const result = await sendFormPinEmail({
+          to: issued.participantEmail,
+          participantName: issued.participantName,
+          caseReference: issued.caseReference,
+          formType: issued.formType,
+          pin: issued.pin,
+          accessUrl: issued.accessUrl,
+          expiresAt: issued.expiresAt,
+        });
+        emailDelivered = result.delivered;
+      } catch (error) {
+        emailError = domainErrorMessage(error);
+      }
+    }
+  } catch (error) {
+    redirect(encodeErrorPath(redirectTo, domainErrorMessage(error)));
+  }
+
+  if (!issued) {
+    redirect(encodeErrorPath(redirectTo, "Failed to issue PIN."));
+  }
+
+  revalidatePath(redirectTo);
+
+  let destination = appendQuery(redirectTo, "pinIssued", "1");
+  destination = appendQuery(destination, "pinRecipient", issued.participantEmail);
+  destination = appendQuery(destination, "pinFormType", issued.formType);
+  destination = appendQuery(destination, "pinExpiresAt", issued.expiresAt.toISOString());
+  destination = appendQuery(destination, "pinAccessUrl", issued.accessUrl);
+  destination = appendQuery(destination, "pinEmailDelivered", emailDelivered ? "1" : "0");
+  if (!emailDelivered) {
+    destination = appendQuery(destination, "pinFallbackCode", issued.pin);
+  }
+  if (emailError) {
+    destination = appendQuery(destination, "pinEmailError", emailError);
+  }
+
+  redirect(destination);
+}
+
+export async function revokeFormPinAction(formData: FormData) {
+  const user = await requirePageUser([UserRole.OPS]);
+  const pinId = String(formData.get("pinId") || "").trim();
+  const reason = String(formData.get("reason") || "").trim();
+  const redirectTo = String(formData.get("redirectTo") || "/admin/cases");
+
+  if (!pinId) {
+    redirect(encodeErrorPath(redirectTo, "PIN id is required."));
+  }
+
+  let revoked:
+    | Awaited<ReturnType<typeof revokeFormPin>>
+    | null = null;
+
+  try {
+    revoked = await revokeFormPin({
+      pinId,
+      revokedByUserId: user.id,
+      reason: reason || undefined,
+    });
+  } catch (error) {
+    redirect(encodeErrorPath(redirectTo, domainErrorMessage(error)));
+  }
+
+  if (!revoked) {
+    redirect(encodeErrorPath(redirectTo, "Failed to disable PIN."));
+  }
+
+  revalidatePath(redirectTo);
+  let destination = appendQuery(redirectTo, "pinRevoked", "1");
+  destination = appendQuery(destination, "pinRevokedFormType", revoked.formType);
+  destination = appendQuery(destination, "pinRevokedRecipient", revoked.participantEmail);
+  destination = appendQuery(destination, "pinRevokedAt", revoked.revokedAt.toISOString());
+  destination = appendQuery(destination, "pinRevokedAlready", revoked.alreadyRevoked ? "1" : "0");
+  redirect(destination);
+}
+
+export async function issueIntakeAccessInviteAction(formData: FormData) {
+  const user = await requirePageUser([UserRole.OPS]);
+  const recipientEmail = String(formData.get("recipientEmail") || "").trim();
+  const recipientName = String(formData.get("recipientName") || "").trim();
+  const expiresInHoursRaw = String(formData.get("expiresInHours") || "").trim();
+  const maxAttemptsRaw = String(formData.get("maxAttempts") || "").trim();
+  const sendEmail = String(formData.get("sendEmail") || "") === "on";
+  const redirectTo = String(formData.get("redirectTo") || "/admin/cases");
+
+  if (!recipientEmail) {
+    redirect(encodeErrorPath(redirectTo, "Recipient email is required."));
+  }
+
+  const expiresInHours = expiresInHoursRaw ? Number(expiresInHoursRaw) : undefined;
+  const maxAttempts = maxAttemptsRaw ? Number(maxAttemptsRaw) : undefined;
+
+  try {
+    const issued = await issueIntakeAccessInvite({
+      recipientEmail,
+      recipientName: recipientName || undefined,
+      expiresInHours,
+      maxAttempts,
+      issuedByUserId: user.id,
+      metadata: {
+        issuedFrom: "ops_cases_page",
+      },
+    });
+
+    let emailDelivered = false;
+    let emailError = "";
+
+    if (sendEmail) {
+      try {
+        const result = await sendIntakeAccessInviteEmail({
+          to: issued.recipientEmail,
+          recipientName: issued.recipientName,
+          pin: issued.pin,
+          accessUrl: issued.accessUrl,
+          expiresAt: issued.expiresAt,
+        });
+        emailDelivered = result.delivered;
+      } catch (error) {
+        emailError = domainErrorMessage(error);
+      }
+    }
+
+    let destination = appendQuery(redirectTo, "intakeInviteIssued", "1");
+    destination = appendQuery(destination, "intakeInviteRecipient", issued.recipientEmail);
+    destination = appendQuery(destination, "intakeInviteAccessUrl", issued.accessUrl);
+    destination = appendQuery(destination, "intakeInviteExpiresAt", issued.expiresAt.toISOString());
+    destination = appendQuery(destination, "intakeInviteEmailDelivered", emailDelivered ? "1" : "0");
+    if (!emailDelivered) {
+      destination = appendQuery(destination, "intakeInvitePin", issued.pin);
+    }
+    if (emailError) {
+      destination = appendQuery(destination, "intakeInviteEmailError", emailError);
+    }
+
+    revalidatePath("/admin/cases");
+    redirect(destination);
   } catch (error) {
     redirect(encodeErrorPath(redirectTo, domainErrorMessage(error)));
   }

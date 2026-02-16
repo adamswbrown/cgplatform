@@ -5,6 +5,9 @@ This app is the workflow/operations brain for a counselling service.
 - Cases are created from intake submissions.
 - Each case is assigned a counselling workflow template.
 - Scheduling is provider-driven (`fake` now, `calcom` placeholder) and blocked until required workflow steps are complete.
+- Terms of Counselling is issued after booking and must be completed before moving a case into `IN_SESSION`.
+- Intake is a secure, non-public "Application for Counselling" multi-step JotForm-aligned flow with safeguarding checks, signature capture, provider-backed availability widget, and confirmation email support.
+- PIN-gated secure forms are supported for time-sensitive controlled access.
 
 ## Architecture Contract
 
@@ -62,6 +65,12 @@ External provider compatibility:
 - Workflow and allocation logic are provider-agnostic; changing provider should only require a new adapter implementing `SchedulingProvider`.
 - This supports Cal.com or alternatives (for example Microsoft Bookings) without changing case lifecycle logic.
 
+Public availability endpoint:
+
+- `GET /api/public-availability`
+- Returns provider-derived slot options for the intake availability widget.
+- Request supports `counsellingType`, optional `durationMinutes`, `location`, and `includeOnline`.
+
 ## Scheduling Gate (Required Rule)
 
 Scheduling is rejected unless all required blocking workflow steps are completed.
@@ -90,11 +99,17 @@ Behavior:
 1. Match submission to a case.
 2. Match to workflow form step by `formType`.
 3. Mark `CaseWorkflowState` as completed.
-4. Re-evaluate and return scheduling eligibility.
+4. For mapped document forms (`TERMS_AND_CONDITIONS`, `INTAKE_FORM`, `OUTTAKE_FORM`), auto-complete matching `DocumentInstance` when present.
+5. Re-evaluate and return scheduling eligibility.
 
 For workflow steps marked as "both participants", participant completions are tracked in metadata and the step only completes once all participants submit.
 
 Note: form files/documents are **not** stored by this endpoint. Only completion state + metadata are stored.
+
+PIN gate behavior:
+
+- If a valid active PIN exists for the same case + participant + `formType`, `/forms/submission` requires a verified PIN session (`accessKey` + cookie) before submission is accepted.
+- This allows ops to throttle form access during high-demand periods.
 
 Availability ingestion (separate endpoint):
 
@@ -129,7 +144,7 @@ Case statuses:
 8. `COMPLETED`
 9. `CLOSED`
 
-Public intake creates pending cases (`AWAITING_REVIEW`) and does not auto-schedule.
+Secure intake submissions create pending cases (`AWAITING_REVIEW`) and do not auto-schedule.
 
 ## Data Model Highlights
 
@@ -153,6 +168,7 @@ Supporting models:
 - `OperationsUser`
 - `UserAccount`
 - `AuthSession`
+- `FormAccessPin`
 
 ## Local Run
 
@@ -183,18 +199,41 @@ npm run dev
 - Specialist: `avery.specialist@demo.local / password123`
 - Specialist: `jordan.specialist@demo.local / password123`
 
+## Local Seed Fixtures
+
+After `npm run db:seed`, deterministic PIN links are created for quick manual testing.
+
+- Secure intake invite
+  - `Intake Prospect <intake.prospect@example.com>`
+  - Access: `/intake/access/seed-intake-primary-2001` with PIN `778899`
+
+- `CASE-1001` (`Taylor Ng`)
+  - `TERMS_AND_CONDITIONS` -> `/forms/access/seed-terms-case-1001` with PIN `111111`
+  - `OUTTAKE_FORM` -> `/forms/access/seed-outtake-case-1001` with PIN `222222`
+- `CASE-1002` (`Chris Diaz`, `Robin Diaz`)
+  - `CONSENT_FORM` (Chris) -> `/forms/access/seed-consent-case-1002-a` with PIN `333333`
+  - `CONSENT_FORM` (Robin) -> `/forms/access/seed-consent-case-1002-b` with PIN `444444`
+  - `AGREEMENT_FORM` (Chris) -> `/forms/access/seed-agreement-case-1002-a` with PIN `555555`
+
 ## Ops Screens
 
 - `/admin/cases`
-- `/admin/cases/[id]`
+- `/admin/cases/[id]` (lifecycle controls, manual override, and provider availability snapshot across all active counsellors)
 - `/admin/clients`
 - `/admin/specialists`
 - `/admin/specialists/[id]`
 - `/admin/workflows` (design templates/steps)
+- `/admin/settings/intake` (edit crisis modal + availability guidance content)
 
-Public:
+Client-facing secure forms:
 
 - `/intake`
+- `/intake/access/[accessKey]` (intake PIN entry)
+- `/forms/access/[accessKey]` (PIN entry)
+- `/forms/terms-and-conditions` (PIN-protected form scaffold)
+- `/forms/agreement` (PIN-protected form scaffold)
+- `/forms/consent` (PIN-protected form scaffold)
+- `/forms/outtake` (PIN-protected form scaffold)
 
 Specialist:
 
@@ -205,6 +244,12 @@ Specialist:
 ## API Surface
 
 - `POST /api/intake`
+- `POST /api/intake/access/issue`
+- `POST /api/intake/access/verify`
+- `GET /api/public-availability`
+- `POST /api/forms/access/issue`
+- `POST /api/forms/access/verify`
+- `GET /api/forms/access/session`
 - `POST /forms/submission`
 - `POST /availability/submission`
 - `POST /api/cases/:id/allocate`
@@ -218,13 +263,94 @@ Specialist:
 
 ## Example Flow (Counselling)
 
-1. Client submits intake form.
-2. Case is created in pending review and assigned a workflow template.
-3. External form completions are ingested via `/forms/submission`.
-4. Clients submit availability via `/availability/submission` (separate per participant).
-5. Workflow remains blocked until overlap exists for all required participants.
-6. Once blocking workflow steps are complete, ops can run allocation.
-7. Scheduler books the earliest eligible slot and case moves to `SCHEDULED`.
+1. Ops issues a secure intake invite (access link + PIN) to the client email.
+2. Client opens `/intake/access/:accessKey`, verifies PIN, and is redirected to `/intake?accessKey=...`.
+3. Client submits intake form.
+4. Case is created in pending review and assigned a workflow template.
+5. External form completions are ingested via `/forms/submission`.
+6. Clients submit availability via the intake widget (provider-backed slots) and `/availability/submission`.
+7. Workflow remains blocked until overlap exists for all required participants.
+8. Once blocking workflow steps are complete, ops can run allocation.
+9. Scheduler books the earliest eligible slot and case moves to `SCHEDULED`.
+10. Terms of Counselling is sent after booking; case cannot transition to `IN_SESSION` until terms is completed.
+
+## Persona Workflows
+
+### End Client
+
+1. Receive a secure intake invite from ops (`/intake/access/:accessKey` + PIN).
+2. Verify PIN, then complete the multi-step "Application for Counselling" form.
+3. Submit availability selections and notes in the intake journey.
+4. Receive confirmation that the case is in review and pending allocation.
+5. Receive secure PIN-gated follow-up forms (for example Terms of Counselling) when issued by ops.
+6. Complete Terms after booking; this is required before the case can progress to `IN_SESSION`.
+
+### Ops Manager
+
+1. Issue secure intake invites and PINs from the ops case area.
+2. Review case details, workflow blockers, submitted forms, documents, and audit logs.
+3. View provider availability across all active counsellors in case detail.
+4. Run auto allocation or manually override specialist assignment.
+5. Transition case statuses through lifecycle stages when gate conditions are met.
+6. Issue and disable PIN-gated form access links for participants.
+7. Manage specialist profiles, capabilities, and provider mapping fields.
+
+### Counsellor
+
+1. See only assigned work in `My Sessions` and `My Clients`.
+2. Open session briefing pages with participants, case notes, submitted documents, flags, and previous sessions.
+3. Deliver counselling sessions according to scheduled bookings and case lifecycle state.
+
+## System Flowchart (Mermaid)
+
+```mermaid
+flowchart TD
+  A["Ops Manager: Issue secure intake invite (accessKey + PIN)"]
+  B["End Client: Open intake access link and verify PIN"]
+  C["End Client: Submit Application for Counselling"]
+  D["System: Create case in AWAITING_REVIEW, assign workflow, complete intake step"]
+  E["End Client(s): Submit availability windows"]
+  F["System: Recompute overlap and scheduling eligibility"]
+  G{"System: All blocking workflow steps complete?"}
+  H["Ops Manager: Review case detail and counsellor availability snapshot"]
+  I["Ops Manager: Auto-allocate or manual override specialist"]
+  J["Scheduling Provider: Return available slots"]
+  K["System: Book earliest matching slot, create session, set case SCHEDULED"]
+  L["System: Trigger/surface Terms of Counselling requirement"]
+  M["End Client: Complete Terms form (PIN-gated when active PIN exists)"]
+  N{"System: Terms document completed?"}
+  O["Ops Manager: Transition case to IN_SESSION, COMPLETED, then CLOSED"]
+  P["Counsellor: View My Sessions, Session Briefing, and My Clients"]
+  X["Provider Event: booking.cancelled or booking.rescheduled"]
+  Y["System: Apply provider event, update session/case, write audit log"]
+
+  A --> B --> C --> D --> E --> F --> G
+  G -- "No" --> E
+  G -- "Yes" --> H --> I --> J --> K --> L --> M --> N
+  N -- "No" --> M
+  N -- "Yes" --> O
+  K --> P
+  X --> Y
+  Y -- "Cancelled: case returns to READY_TO_SCHEDULE" --> H
+  Y -- "Rescheduled: case remains SCHEDULED" --> P
+```
+
+## PIN-Gated Forms
+
+1. Ops opens case detail and issues a PIN for a participant + `formType` + target form path.
+2. In ops case detail, changing `formType` auto-populates the default `formPath` for that form.
+3. System generates an `accessKey` (link identifier), numeric PIN, and expiry/max-attempt lock settings.
+4. Email send includes both link (`/forms/access/:accessKey`) and PIN.
+5. Client enters PIN on the secure access screen.
+6. Verified session cookie is set and user is redirected to target form.
+7. Submission endpoint enforces PIN session when an active PIN exists.
+8. Ops can disable any active PIN from case detail; disabled links can no longer be verified.
+
+## Secure Intake Access (Not Public)
+
+- `/intake` without `accessKey` does not render the form; it shows a secure access notice.
+- Intake access is granted through `/intake/access/:accessKey` + PIN verification.
+- `/api/intake` requires a valid intake access session cookie and matching invite recipient identity.
 
 Provider-originated booking events are ingested via `/api/provider/events`. Cancellation events mark the session cancelled and move the case back to `READY_TO_SCHEDULE`.
 
@@ -236,11 +362,18 @@ Run:
 npm run test:e2e
 ```
 
+`test:e2e` now performs an automatic Prisma reset + seed in Playwright global setup so scheduling tests remain deterministic across repeated local runs.
+
 Current suite validates:
 
 - intake-to-closure flow
 - specialist profile edit
 - role-scoped client dashboards
+- PIN-gated form verification and secure submission enforcement
+- Terms of Counselling form completion with declaration + signature metadata capture
+- send form PIN form-path auto-sync by selected form type
+- ops PIN disable/revoke flow and blocked re-verification
+- PIN-gated consent form detail validation and submission
 - one-to-one durations: `30/60/90`
 - many-to-one durations: `30/60/90`
 - scheduling gate blocks allocation until blocking workflow steps complete

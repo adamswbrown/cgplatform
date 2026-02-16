@@ -60,6 +60,7 @@ model Client {
   phone        String?
   participants CaseParticipant[]
   availabilityWindows CaseAvailabilityWindow[]
+  formAccessPins FormAccessPin[]
   createdAt    DateTime          @default(now())
   updatedAt    DateTime          @updatedAt
 }
@@ -72,6 +73,11 @@ model Case {
   intakeSource         String             @default("WEB_FORM")
   intakeExternalId     String?
   intakeReceivedAt     DateTime?
+  intakeFormData       Json?
+  consentSignedAt      DateTime?
+  consentSignature     String?
+  consentSignatureType String?
+  consentIpAddress     String?
   caseWorkflowTemplateId String?
   notes                String?
   flags                String[]           @default([])
@@ -84,6 +90,7 @@ model Case {
   workflowStates       CaseWorkflowState[]
   sessions             Session[]
   documents            DocumentInstance[]
+  formAccessPins       FormAccessPin[]
   auditLogs            AuditLog[]
   createdAt            DateTime           @default(now())
   updatedAt            DateTime           @updatedAt
@@ -276,6 +283,8 @@ model UserAccount {
   operationsUser OperationsUser?
   sessions       AuthSession[]
   auditLogs      AuditLog[]
+  issuedFormAccessPins FormAccessPin[] @relation("FormAccessPinIssuer")
+  issuedIntakeAccessInvites IntakeAccessInvite[] @relation("IntakeAccessInviteIssuer")
   createdAt      DateTime        @default(now())
   updatedAt      DateTime        @updatedAt
 }
@@ -298,5 +307,67 @@ model AuthSession {
   createdAt DateTime    @default(now())
 
   @@index([userId])
+  @@index([expiresAt])
+}
+
+model SystemSetting {
+  id        String   @id @default(cuid())
+  key       String   @unique
+  value     Json
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model IntakeAccessInvite {
+  id               String      @id @default(cuid())
+  recipientEmail   String
+  recipientName    String?
+  accessKey        String      @unique
+  pinHash          String
+  expiresAt        DateTime
+  sessionTokenHash String?
+  sessionExpiresAt DateTime?
+  attemptCount     Int         @default(0)
+  maxAttempts      Int         @default(5)
+  lastAttemptAt    DateTime?
+  lastVerifiedAt   DateTime?
+  revokedAt        DateTime?
+  usedAt           DateTime?
+  metadata         Json?
+  issuedByUserId   String?
+  issuedBy         UserAccount? @relation("IntakeAccessInviteIssuer", fields: [issuedByUserId], references: [id], onDelete: SetNull)
+  createdAt        DateTime    @default(now())
+  updatedAt        DateTime    @updatedAt
+
+  @@index([recipientEmail, expiresAt])
+  @@index([expiresAt])
+}
+
+model FormAccessPin {
+  id               String      @id @default(cuid())
+  caseId            String
+  clientId          String
+  formType          String
+  formPath          String
+  accessKey         String      @unique
+  pinHash           String
+  expiresAt         DateTime
+  sessionTokenHash  String?
+  sessionExpiresAt  DateTime?
+  attemptCount      Int         @default(0)
+  maxAttempts       Int         @default(5)
+  lastAttemptAt     DateTime?
+  lastVerifiedAt    DateTime?
+  revokedAt         DateTime?
+  metadata          Json?
+  issuedByUserId    String?
+  case              Case        @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  client            Client      @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  issuedBy          UserAccount? @relation("FormAccessPinIssuer", fields: [issuedByUserId], references: [id], onDelete: SetNull)
+  createdAt         DateTime    @default(now())
+  updatedAt         DateTime    @updatedAt
+
+  @@index([caseId, formType, expiresAt])
+  @@index([clientId, formType, expiresAt])
   @@index([expiresAt])
 }

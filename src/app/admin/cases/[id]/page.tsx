@@ -5,12 +5,20 @@ import {
   autoAllocateCaseAction,
   assignCaseWorkflowAction,
   completeDocumentAction,
+  issueFormPinAction,
+  revokeFormPinAction,
   overrideAssignmentAction,
   transitionCaseAction,
 } from "@/app/actions";
 import { AuthenticatedShell } from "@/components/authenticated-shell";
+import { FormPinRoutingFields } from "@/components/forms/form-pin-routing-fields";
 import { requirePageUser } from "@/lib/auth";
-import { getCaseDetails, listSpecialistsForOps, listWorkflowTemplatesForOps } from "@/lib/case-service";
+import {
+  getCaseDetails,
+  getCaseSpecialistAvailability,
+  listSpecialistsForOps,
+  listWorkflowTemplatesForOps,
+} from "@/lib/case-service";
 import { formatDateTime, formatStatus } from "@/lib/format";
 import { CASE_TRANSITIONS } from "@/lib/workflow";
 
@@ -18,6 +26,17 @@ type CaseDetailPageProps = {
   params: Promise<{ id: string }>;
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 };
+
+function readStringMetadata(
+  metadata: Record<string, unknown> | null,
+  key: string,
+): string | null {
+  if (!metadata) {
+    return null;
+  }
+  const value = metadata[key];
+  return typeof value === "string" && value.trim() ? value : null;
+}
 
 export default async function CaseDetailPage({ params, searchParams }: CaseDetailPageProps) {
   const user = await requirePageUser([UserRole.OPS]);
@@ -34,9 +53,28 @@ export default async function CaseDetailPage({ params, searchParams }: CaseDetai
     notFound();
   }
 
+  const specialistAvailability = await getCaseSpecialistAvailability(caseItem.id);
+
   const transitionOptions = CASE_TRANSITIONS[caseItem.status];
   const error = typeof query.error === "string" ? query.error : null;
+  const pinIssued = query.pinIssued === "1";
+  const pinRecipient = typeof query.pinRecipient === "string" ? query.pinRecipient : null;
+  const pinFormType = typeof query.pinFormType === "string" ? query.pinFormType : null;
+  const pinExpiresAt = typeof query.pinExpiresAt === "string" ? query.pinExpiresAt : null;
+  const pinAccessUrl = typeof query.pinAccessUrl === "string" ? query.pinAccessUrl : null;
+  const pinEmailDelivered = query.pinEmailDelivered === "1";
+  const pinFallbackCode = typeof query.pinFallbackCode === "string" ? query.pinFallbackCode : null;
+  const pinEmailError = typeof query.pinEmailError === "string" ? query.pinEmailError : null;
+  const pinRevoked = query.pinRevoked === "1";
+  const pinRevokedFormType =
+    typeof query.pinRevokedFormType === "string" ? query.pinRevokedFormType : null;
+  const pinRevokedRecipient =
+    typeof query.pinRevokedRecipient === "string" ? query.pinRevokedRecipient : null;
+  const pinRevokedAt = typeof query.pinRevokedAt === "string" ? query.pinRevokedAt : null;
+  const pinRevokedAlready = query.pinRevokedAlready === "1";
   const redirectTo = `/admin/cases/${caseItem.id}`;
+  const now = new Date();
+  const activePins = caseItem.formAccessPins.filter((pin) => !pin.revokedAt && pin.expiresAt > now);
 
   return (
     <AuthenticatedShell
@@ -49,13 +87,49 @@ export default async function CaseDetailPage({ params, searchParams }: CaseDetai
         { href: "/admin/clients", label: "All Clients" },
         { href: "/admin/specialists", label: "Specialists" },
         { href: "/admin/workflows", label: "Workflows" },
-        { href: "/intake", label: "Public Intake" },
+        { href: "/admin/settings/intake", label: "Intake Settings" },
+        { href: "/intake", label: "Secure Intake" },
       ]}
     >
       {error ? (
         <p className="mb-4 rounded-md border border-[color:var(--danger)] bg-red-50 px-3 py-2 text-sm text-[color:var(--danger)]">
           {error}
         </p>
+      ) : null}
+      {pinIssued ? (
+        <div className="mb-4 rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-800">
+          <p>
+            PIN issued for <strong>{pinRecipient}</strong> ({pinFormType}).
+          </p>
+          {pinExpiresAt ? <p className="text-xs">Expires: {formatDateTime(pinExpiresAt)}</p> : null}
+          {pinAccessUrl ? (
+            <p className="mt-1 text-xs">
+              Access page:{" "}
+              <a href={pinAccessUrl} className="underline">
+                {pinAccessUrl}
+              </a>
+            </p>
+          ) : null}
+          {pinEmailDelivered ? (
+            <p className="mt-1 text-xs">PIN email was sent.</p>
+          ) : (
+            <p className="mt-1 text-xs">
+              Email was not sent from the system. Share this PIN manually:{" "}
+              <strong>{pinFallbackCode || "Unavailable"}</strong>
+            </p>
+          )}
+          {pinEmailError ? <p className="mt-1 text-xs">Email error: {pinEmailError}</p> : null}
+        </div>
+      ) : null}
+      {pinRevoked ? (
+        <div className="mb-4 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+          <p>
+            {pinRevokedAlready ? "PIN was already disabled" : "PIN disabled"} for{" "}
+            <strong>{pinRevokedRecipient || "participant"}</strong>
+            {pinRevokedFormType ? ` (${pinRevokedFormType})` : ""}.
+          </p>
+          {pinRevokedAt ? <p className="text-xs">Disabled: {formatDateTime(pinRevokedAt)}</p> : null}
+        </div>
       ) : null}
 
       <div className="grid gap-4 lg:grid-cols-12">
@@ -222,19 +296,51 @@ export default async function CaseDetailPage({ params, searchParams }: CaseDetai
               {caseItem.workflowStates
                 .slice()
                 .sort((a, b) => a.step.sortOrder - b.step.sortOrder)
-                .map((state) => (
-                  <li key={state.id} className="rounded-md border border-[color:var(--border)] p-2">
-                    <p className="font-medium">{state.step.name}</p>
-                    <p className="text-[color:var(--muted)]">
-                      {state.step.type}
-                      {state.step.formType ? ` • ${state.step.formType}` : ""}
-                      {state.step.blocksScheduling ? " • blocks scheduling" : ""}
-                    </p>
-                    <p className="mt-1">
-                      {state.status === "COMPLETED" ? "Completed" : "Pending"}
-                    </p>
-                  </li>
-                ))}
+                .map((state) => {
+                  const metadata =
+                    state.metadata && typeof state.metadata === "object"
+                      ? (state.metadata as Record<string, unknown>)
+                      : null;
+                  const submittedBy = readStringMetadata(metadata, "participantIdentifier");
+                  const submittedAt = readStringMetadata(metadata, "ingestedAt");
+                  const printedName = readStringMetadata(metadata, "printedName");
+                  const signedDate = readStringMetadata(metadata, "signedDate");
+                  const signatureType = readStringMetadata(metadata, "signatureType");
+                  const details = readStringMetadata(metadata, "details");
+
+                  return (
+                    <li key={state.id} className="rounded-md border border-[color:var(--border)] p-2">
+                      <p className="font-medium">{state.step.name}</p>
+                      <p className="text-[color:var(--muted)]">
+                        {state.step.type}
+                        {state.step.formType ? ` • ${state.step.formType}` : ""}
+                        {state.step.blocksScheduling ? " • blocks scheduling" : ""}
+                      </p>
+                      <p className="mt-1">
+                        {state.status === "COMPLETED" ? "Completed" : "Pending"}
+                      </p>
+                      {state.status === "COMPLETED" && (submittedBy || submittedAt) ? (
+                        <p className="mt-1 text-[color:var(--muted)]">
+                          {submittedBy ? `Submitted by: ${submittedBy}` : ""}
+                          {submittedBy && submittedAt ? " • " : ""}
+                          {submittedAt ? `At: ${formatDateTime(submittedAt)}` : ""}
+                        </p>
+                      ) : null}
+                      {state.status === "COMPLETED" && (printedName || signedDate || signatureType) ? (
+                        <p className="mt-1 text-[color:var(--muted)]">
+                          {printedName ? `Printed name: ${printedName}` : ""}
+                          {printedName && signedDate ? " • " : ""}
+                          {signedDate ? `Signed date: ${signedDate}` : ""}
+                          {(printedName || signedDate) && signatureType ? " • " : ""}
+                          {signatureType ? `Signature: ${signatureType}` : ""}
+                        </p>
+                      ) : null}
+                      {state.status === "COMPLETED" && details ? (
+                        <p className="mt-1 text-[color:var(--muted)]">Details: {details}</p>
+                      ) : null}
+                    </li>
+                  );
+                })}
             </ul>
           </div>
 
@@ -296,6 +402,167 @@ export default async function CaseDetailPage({ params, searchParams }: CaseDetai
                 Apply override
               </button>
             </form>
+          </div>
+
+          <div className="rounded-2xl border border-[color:var(--border)] bg-[color:var(--surface)] p-4 shadow-sm">
+            <h3 className="text-sm font-semibold">Counsellor availability (provider)</h3>
+            <p className="mt-1 text-xs text-[color:var(--muted)]">
+              Read-only provider availability for all active counsellors. Ops can still override
+              assignment.
+            </p>
+            <p className="mt-2 text-xs text-[color:var(--muted)]">
+              Client availability submissions: {specialistAvailability.clientAvailability.participantsSubmitted}/
+              {specialistAvailability.clientAvailability.requiredParticipants} • Overlap windows:{" "}
+              {specialistAvailability.clientAvailability.overlapWindowCount}
+            </p>
+            {!specialistAvailability.clientAvailability.hasOverlap &&
+            specialistAvailability.clientAvailability.reason ? (
+              <p className="mt-1 text-xs text-amber-700">
+                {specialistAvailability.clientAvailability.reason}
+              </p>
+            ) : null}
+
+            {specialistAvailability.specialists.length === 0 ? (
+              <p className="mt-2 text-xs text-[color:var(--muted)]">
+                No active specialists available for this case type.
+              </p>
+            ) : (
+              <ul className="mt-3 space-y-2 text-xs">
+                {specialistAvailability.specialists.map((entry) => (
+                  <li key={entry.specialistId} className="rounded-md border border-[color:var(--border)] p-2">
+                    <p className="font-medium">
+                      <Link href={`/admin/specialists/${entry.specialistId}`} className="underline">
+                        {entry.specialistName}
+                      </Link>
+                      {entry.supportsCouples ? " • couples" : ""}
+                    </p>
+                    <p className="text-[color:var(--muted)]">
+                      Next provider slot:{" "}
+                      {entry.nextProviderSlot ? formatDateTime(entry.nextProviderSlot) : "None returned"}
+                    </p>
+                    <p className="text-[color:var(--muted)]">
+                      Earliest slot matching client availability:{" "}
+                      {entry.nextClientMatchedSlot
+                        ? formatDateTime(entry.nextClientMatchedSlot)
+                        : "No overlap match"}
+                    </p>
+                    {entry.error ? <p className="mt-1 text-[color:var(--danger)]">{entry.error}</p> : null}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+
+          <div className="rounded-2xl border border-[color:var(--border)] bg-[color:var(--surface)] p-4 shadow-sm">
+            <h3 className="text-sm font-semibold">Send Form PIN</h3>
+            <p className="mt-1 text-xs text-[color:var(--muted)]">
+              Generate a time-sensitive PIN and access link before client-facing forms.
+            </p>
+            <form action={issueFormPinAction} className="mt-3 space-y-2">
+              <input type="hidden" name="caseId" value={caseItem.id} />
+              <input type="hidden" name="redirectTo" value={redirectTo} />
+
+              <label htmlFor="participantIdentifier" className="block text-xs font-medium">
+                Participant
+              </label>
+              <select
+                id="participantIdentifier"
+                name="participantIdentifier"
+                className="w-full rounded-md border border-[color:var(--border)] px-2 py-2 text-sm"
+                required
+              >
+                {caseItem.participants.map((participant) => (
+                  <option key={participant.id} value={participant.client.email}>
+                    {participant.client.firstName} {participant.client.lastName} ({participant.client.email})
+                  </option>
+                ))}
+              </select>
+
+              <FormPinRoutingFields initialFormType="INTAKE_FORM" initialFormPath="/intake" />
+
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label htmlFor="expiresInHoursPin" className="block text-xs font-medium">
+                    Expires (hours)
+                  </label>
+                  <input
+                    id="expiresInHoursPin"
+                    name="expiresInHours"
+                    type="number"
+                    min={1}
+                    max={336}
+                    defaultValue={72}
+                    className="w-full rounded-md border border-[color:var(--border)] px-2 py-2 text-sm"
+                  />
+                </div>
+                <div>
+                  <label htmlFor="maxAttemptsPin" className="block text-xs font-medium">
+                    Max attempts
+                  </label>
+                  <input
+                    id="maxAttemptsPin"
+                    name="maxAttempts"
+                    type="number"
+                    min={1}
+                    max={20}
+                    defaultValue={5}
+                    className="w-full rounded-md border border-[color:var(--border)] px-2 py-2 text-sm"
+                  />
+                </div>
+              </div>
+
+              <label className="flex items-center gap-2 text-xs">
+                <input type="checkbox" name="sendEmail" defaultChecked />
+                Send PIN by email now
+              </label>
+
+              <button
+                type="submit"
+                className="w-full rounded-md border border-[color:var(--border)] px-3 py-2 text-xs font-semibold hover:bg-[color:var(--accent-soft)]"
+              >
+                Issue PIN
+              </button>
+            </form>
+
+            <div className="mt-3 border-t border-[color:var(--border)] pt-3">
+              <p className="text-xs font-medium text-[color:var(--muted)]">Active PINs</p>
+              {activePins.length === 0 ? (
+                <p className="mt-1 text-xs text-[color:var(--muted)]">No active PIN links.</p>
+              ) : (
+                <ul className="mt-2 space-y-2 text-xs">
+                  {activePins.map((pin) => (
+                    <li key={pin.id} className="rounded-md border border-[color:var(--border)] p-2">
+                      <p className="font-medium">
+                        {pin.client.firstName} {pin.client.lastName} ({pin.client.email})
+                      </p>
+                      <p>
+                        {pin.formType} • Expires {formatDateTime(pin.expiresAt)}
+                      </p>
+                      <p className="break-all">
+                        Access:{" "}
+                        <a href={`/forms/access/${pin.accessKey}`} className="underline">
+                          /forms/access/{pin.accessKey}
+                        </a>
+                      </p>
+                      <p className="text-[color:var(--muted)]">
+                        Attempts: {pin.attemptCount}/{pin.maxAttempts}
+                      </p>
+                      <form action={revokeFormPinAction} className="mt-2">
+                        <input type="hidden" name="pinId" value={pin.id} />
+                        <input type="hidden" name="redirectTo" value={redirectTo} />
+                        <input type="hidden" name="reason" value="Disabled by operations user" />
+                        <button
+                          type="submit"
+                          className="rounded-md border border-amber-300 bg-amber-100 px-2 py-1 text-xs font-semibold text-amber-900 hover:bg-amber-200"
+                        >
+                          Disable PIN
+                        </button>
+                      </form>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
           </div>
 
           <div className="rounded-2xl border border-[color:var(--border)] bg-[color:var(--surface)] p-4 shadow-sm">

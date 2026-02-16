@@ -24,6 +24,8 @@ export default async function AdminWorkflowsPage({ searchParams }: AdminWorkflow
         { href: "/admin/clients", label: "All Clients" },
         { href: "/admin/specialists", label: "Specialists" },
         { href: "/admin/workflows", label: "Workflows" },
+        { href: "/admin/settings/intake", label: "Intake Settings" },
+        { href: "/intake", label: "Secure Intake" },
       ]}
     >
       {error ? (
