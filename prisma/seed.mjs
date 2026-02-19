@@ -19,6 +19,12 @@ function addHours(date, hours) {
   return value;
 }
 
+function startOfDay(date) {
+  const value = new Date(date);
+  value.setHours(0, 0, 0, 0);
+  return value;
+}
+
 function formPinSecret() {
   return process.env.FORM_PIN_SECRET || process.env.AUTH_SECRET || "dev-form-pin-secret";
 }
@@ -301,10 +307,15 @@ async function applyUserSeedConfig(input) {
       existingCase ||
       (await prisma.case.create({
         data: {
+          ...(Object.prototype.hasOwnProperty.call(caseSeed, "intakeFormData")
+            ? {
+                intakeFormData: caseSeed.intakeFormData,
+              }
+            : {}),
           reference,
           status: toCaseStatus(caseSeed.status, CaseStatus.NEW),
           counsellingType,
-          intakeSource: String(caseSeed.intakeSource || "CUSTOM_SEED"),
+          intakeSource: String(caseSeed.intakeSource || "SECURE_LINK"),
           intakeExternalId: caseSeed.intakeExternalId ? String(caseSeed.intakeExternalId) : null,
           intakeReceivedAt: parseDateOrDefault(caseSeed.intakeReceivedAt, now),
           caseWorkflowTemplateId: workflowTemplate?.id || null,
@@ -410,10 +421,10 @@ async function applyUserSeedConfig(input) {
             status: toSessionStatus(caseSeed.session.status, SessionStatus.SCHEDULED),
             providerBookingId:
               String(caseSeed.session.providerBookingId || "").trim() ||
-              `fake-custom-${reference.toLowerCase()}`,
+              `manual-custom-${reference.toLowerCase()}`,
             providerStartTime: startTime,
             providerEndTime: endTime,
-            providerType: String(caseSeed.session.providerType || "fake"),
+            providerType: String(caseSeed.session.providerType || "manual"),
             providerStatus: String(caseSeed.session.providerStatus || "scheduled"),
             lastProviderSyncAt: now,
             notes: caseSeed.session.notes ? String(caseSeed.session.notes) : null,
@@ -508,6 +519,7 @@ async function main() {
   await prisma.intakeAccessInvite.deleteMany();
   await prisma.documentInstance.deleteMany();
   await prisma.session.deleteMany();
+  await prisma.specialistAvailabilityWindow.deleteMany();
   await prisma.caseAvailabilityWindow.deleteMany();
   await prisma.caseWorkflowState.deleteMany();
   await prisma.caseParticipant.deleteMany();
@@ -627,9 +639,19 @@ async function main() {
     },
   });
 
+  await prisma.systemSetting.create({
+    data: {
+      key: "operational_settings",
+      value: {
+        defaultIntakeSource: "SECURE_LINK",
+      },
+    },
+  });
+
   const [soloSpecialist, couplesSpecialist, backupSpecialist] = await Promise.all([
     prisma.specialist.create({
       data: {
+        id: "seed-specialist-avery-mills",
         name: "Avery Mills",
         email: "avery.specialist@demo.local",
         supportsCouples: false,
@@ -641,6 +663,7 @@ async function main() {
     }),
     prisma.specialist.create({
       data: {
+        id: "seed-specialist-jordan-patel",
         name: "Jordan Patel",
         email: "jordan.specialist@demo.local",
         supportsCouples: true,
@@ -652,6 +675,7 @@ async function main() {
     }),
     prisma.specialist.create({
       data: {
+        id: "seed-specialist-morgan-lee",
         name: "Morgan Lee",
         email: "morgan.specialist@demo.local",
         supportsCouples: true,
@@ -704,6 +728,41 @@ async function main() {
       },
     ],
   });
+
+  const seededAvailabilityWindows = [];
+  const specialistAvailabilityTargets = [soloSpecialist, couplesSpecialist, backupSpecialist];
+  const availabilityStart = startOfDay(new Date());
+
+  for (let dayOffset = 0; dayOffset < 10; dayOffset += 1) {
+    const day = addDays(availabilityStart, dayOffset);
+    const weekday = day.getDay();
+    if (weekday === 0 || weekday === 6) {
+      continue;
+    }
+
+    for (const specialist of specialistAvailabilityTargets) {
+      for (let hour = 9; hour < 18; hour += 1) {
+        const startTime = new Date(day);
+        startTime.setHours(hour, 0, 0, 0);
+        const endTime = new Date(startTime);
+        endTime.setHours(hour + 1, 0, 0, 0);
+        seededAvailabilityWindows.push({
+          specialistId: specialist.id,
+          startTime,
+          endTime,
+          timezone: "Europe/London",
+          source: "seed",
+          createdByUserId: opsUser.id,
+        });
+      }
+    }
+  }
+
+  if (seededAvailabilityWindows.length > 0) {
+    await prisma.specialistAvailabilityWindow.createMany({
+      data: seededAvailabilityWindows,
+    });
+  }
 
   const [singleClient, coupleA, coupleB] = await Promise.all([
     prisma.client.create({
@@ -837,13 +896,83 @@ async function main() {
     Promise.all(couplesStepInputs.map((data) => prisma.caseWorkflowStep.create({ data }))),
   ]);
 
+  const singleCaseIntakeFormData = {
+    participantType: "single",
+    primary: {
+      title: "Mr",
+      firstName: "Taylor",
+      lastName: "Ng",
+      dateOfBirth: "1989-04-12",
+      gender: "male",
+      email: "taylor.ng@example.com",
+      mainPhone: "+447700900001",
+      secondPhone: "+447700900009",
+      addressLine1: "24 Willow Court",
+      addressLine2: "",
+      city: "Newtownards",
+      county: "County Down",
+      postcode: "BT23 4EN",
+      countryIfNotUk: "",
+      churchConnection: "yes",
+      leadershipRole: "no",
+      heardAbout: "WEBSITE",
+      heardAboutOtherDetail: "",
+      contactPreferences: {
+        contactMainPhone: "yes",
+        leaveVoicemailMainPhone: "yes",
+        contactSecondPhone: "no",
+        leaveVoicemailSecondPhone: "no",
+        contactEmail: "yes",
+      },
+      emergencyContactFirstName: "Alex",
+      emergencyContactLastName: "Ng",
+      emergencyRelationship: "Sibling",
+      emergencyPhone: "+447700900010",
+      gpSurgeryName: "West Street Medical Centre",
+      gpSurgeryPhone: "+442891468846",
+      gpDoctorName: "Dr Stewart",
+    },
+    secondary: {},
+    counsellingType: "individual",
+    consent: {
+      signature: "Taylor Ng",
+      signatureType: "typed",
+      signedAt: addDays(new Date(), -4).toISOString(),
+    },
+    presenting: {
+      mainIssue: "ANXIETY_STRESS",
+      otherDetails: "",
+      issueDuration: "About 8 months",
+      previousSupport: "yes",
+      previousSupportDetails: "Saw GP for stress management in 2025.",
+      suicidalThoughtsRecently: "no",
+      suicidalThoughtsDetails: "",
+      attemptedSuicide: "no",
+      attemptedSuicideDetails: "",
+    },
+    availability: {
+      location: "NEWTOWNARDS",
+      includeOnline: true,
+      notes: "Morning sessions preferred due to childcare.",
+      timePreferences: ["MORNING"],
+      selectedSlots: [
+        {
+          startTime: addDays(new Date(), 1).toISOString(),
+          endTime: addHours(addDays(new Date(), 1), 1).toISOString(),
+        },
+      ],
+    },
+    requestedDurationMinutes: 60,
+  };
+
   const singleCase = await prisma.case.create({
     data: {
       reference: "CASE-1001",
       status: CaseStatus.SCHEDULED,
       counsellingType: "individual",
-      intakeSource: "WEB_FORM",
+      intakeSource: "SECURE_LINK",
       intakeReceivedAt: addDays(new Date(), -4),
+      intakeFormData: singleCaseIntakeFormData,
       caseWorkflowTemplateId: generalWorkflow.id,
       notes: "Prefers morning sessions and structured plans.",
       flags: ["first_time_client"],
@@ -867,10 +996,10 @@ async function main() {
       caseId: singleCase.id,
       specialistId: soloSpecialist.id,
       status: SessionStatus.SCHEDULED,
-      providerBookingId: "fake-seed-booking-1001",
+      providerBookingId: "manual-seed-booking-1001",
       providerStartTime: sessionStart,
       providerEndTime: addHours(sessionStart, 1),
-      providerType: "fake",
+      providerType: "manual",
       providerStatus: "scheduled",
       lastProviderSyncAt: new Date(),
       notes: "Bring prior assessment notes.",
@@ -944,14 +1073,92 @@ async function main() {
     ],
   });
 
+  const coupleCaseIntakeFormData = {
+    participantType: "couple",
+    primary: {
+      title: "Mrs",
+      firstName: "Chris",
+      lastName: "Diaz",
+      dateOfBirth: "1987-01-05",
+      gender: "female",
+      email: "chris.diaz@example.com",
+      mainPhone: "+447700900021",
+      secondPhone: "",
+      addressLine1: "16 Shore Road",
+      addressLine2: "",
+      city: "Bangor",
+      county: "County Down",
+      postcode: "BT20 3AB",
+      countryIfNotUk: "",
+      churchConnection: "yes",
+      leadershipRole: "prefer_not_to_say",
+      heardAbout: "OTHER",
+      heardAboutOtherDetail: "Referred by church safeguarding lead.",
+      contactPreferences: {
+        contactMainPhone: "yes",
+        leaveVoicemailMainPhone: "no",
+        contactSecondPhone: "no",
+        leaveVoicemailSecondPhone: "no",
+        contactEmail: "yes",
+      },
+      emergencyContactFirstName: "Mia",
+      emergencyContactLastName: "Diaz",
+      emergencyRelationship: "Sister",
+      emergencyPhone: "+447700900022",
+      gpSurgeryName: "Ards Family Practice",
+      gpSurgeryPhone: "+442891468850",
+      gpDoctorName: "Dr Patel",
+    },
+    secondary: {
+      title: "Mr",
+      firstName: "Robin",
+      lastName: "Diaz",
+      email: "robin.diaz@example.com",
+      mainPhone: "+447700900023",
+      dateOfBirth: "1986-07-11",
+      gender: "male",
+    },
+    counsellingType: "couples",
+    consent: {
+      signature: "Chris Diaz",
+      signatureType: "typed",
+      signedAt: addDays(new Date(), -1).toISOString(),
+    },
+    presenting: {
+      mainIssue: "MARRIAGE",
+      otherDetails: "",
+      issueDuration: "Relationship pressure over the last 18 months",
+      previousSupport: "yes",
+      previousSupportDetails: "Attended short couples mediation last year.",
+      suicidalThoughtsRecently: "no",
+      suicidalThoughtsDetails: "",
+      attemptedSuicide: "no",
+      attemptedSuicideDetails: "",
+    },
+    availability: {
+      location: "NEWTOWNARDS",
+      includeOnline: true,
+      notes: "Afternoon works best, evening can work on Thursdays.",
+      timePreferences: ["AFTERNOON", "EVENING"],
+      selectedSlots: [
+        {
+          startTime: addDays(new Date(), 2).toISOString(),
+          endTime: addHours(addDays(new Date(), 2), 1).toISOString(),
+        },
+      ],
+    },
+    requestedDurationMinutes: 60,
+  };
+
   const coupleCase = await prisma.case.create({
     data: {
       reference: "CASE-1002",
-      status: CaseStatus.NEW,
+      status: CaseStatus.READY_TO_SCHEDULE,
       counsellingType: "couples",
       intakeSource: "MICROSOFT_FORMS",
       intakeExternalId: "seed-ms-response-1002",
       intakeReceivedAt: addDays(new Date(), -1),
+      intakeFormData: coupleCaseIntakeFormData,
       caseWorkflowTemplateId: couplesWorkflow.id,
       notes: "Couple requests late-afternoon availability.",
       flags: ["couple", "priority_match"],
@@ -971,11 +1178,28 @@ async function main() {
   });
 
   await prisma.caseWorkflowState.createMany({
-    data: couplesSteps.map((step) => ({
-      caseId: coupleCase.id,
-      stepId: step.id,
-      status: "PENDING",
-    })),
+    data: couplesSteps.map((step) => {
+      const completeByFormType = new Set([
+        "INTAKE_FORM",
+        "CONSENT_FORM",
+        "AGREEMENT_FORM",
+        "AVAILABILITY_SUBMISSION",
+      ]);
+      const isCompleted = Boolean(step.formType && completeByFormType.has(step.formType));
+
+      return {
+        caseId: coupleCase.id,
+        stepId: step.id,
+        status: isCompleted ? "COMPLETED" : "PENDING",
+        metadata: isCompleted
+          ? {
+              source: "seed",
+              formType: step.formType,
+            }
+          : null,
+        completedAt: isCompleted ? addDays(new Date(), -1) : null,
+      };
+    }),
   });
 
   const seededFormPins = [
@@ -1146,7 +1370,7 @@ async function main() {
   console.log("  Specialist: jordan.specialist@demo.local / password123");
   console.log("Seeded cases:");
   console.log("  CASE-1001: Individual, scheduled (Taylor Ng)");
-  console.log("  CASE-1002: Couples, new/pending (Chris Diaz + Robin Diaz)");
+  console.log("  CASE-1002: Couples, ready to schedule (Chris Diaz + Robin Diaz)");
   const localBaseUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3001";
   console.log("Seeded secure intake access:");
   console.log(

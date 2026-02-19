@@ -1,25 +1,58 @@
 import type { SchedulingPersistence, SchedulingProvider } from "@/lib/scheduling/types";
 import { CalcomSchedulingProvider } from "@/lib/scheduling/calcom-provider";
-import { FakeSchedulingProvider } from "@/lib/scheduling/fake-provider";
+import { ManualSchedulingProvider } from "@/lib/scheduling/manual-provider";
+import { MicrosoftBookingsSchedulingProvider } from "@/lib/scheduling/microsoft-bookings-provider";
+import { getSchedulingEngineType, type SchedulingEngineType } from "@/lib/scheduling/config";
 
-const DEFAULT_PROVIDER = "fake";
+const DEFAULT_ENGINE: SchedulingEngineType = "manual";
 
-function resolveProviderName() {
-  return (process.env.SCHEDULING_PROVIDER || DEFAULT_PROVIDER).trim().toLowerCase();
-}
+function resolveLegacyEngineFromEnvironment(): SchedulingEngineType {
+  const normalized = String(
+    process.env.SCHEDULING_ENGINE || process.env.SCHEDULING_PROVIDER || DEFAULT_ENGINE,
+  )
+    .trim()
+    .toLowerCase();
 
-export function createSchedulingProvider(persistence: SchedulingPersistence): SchedulingProvider {
-  const providerName = resolveProviderName();
-
-  if (providerName === "fake") {
-    return new FakeSchedulingProvider(persistence);
+  if (normalized === "manual") {
+    return "manual";
+  }
+  if (normalized === "calcom") {
+    return "calcom";
+  }
+  if (normalized === "microsoft_bookings" || normalized === "microsoft-bookings") {
+    return "microsoft_bookings";
   }
 
-  if (providerName === "calcom") {
+  return DEFAULT_ENGINE;
+}
+
+function createProviderByEngine(
+  persistence: SchedulingPersistence,
+  engine: SchedulingEngineType,
+): SchedulingProvider {
+  if (engine === "manual") {
+    return new ManualSchedulingProvider(persistence, { providerType: "manual" });
+  }
+  if (engine === "calcom") {
     return new CalcomSchedulingProvider(persistence);
+  }
+  if (engine === "microsoft_bookings") {
+    return new MicrosoftBookingsSchedulingProvider(persistence);
   }
 
   throw new Error(
-    `Unsupported scheduling provider: ${providerName}. Use SCHEDULING_PROVIDER=fake|calcom.`,
+    `Unsupported scheduling engine: ${engine}. Use manual|calcom|microsoft_bookings.`,
   );
+}
+
+export async function createSchedulingProvider(
+  persistence: SchedulingPersistence,
+): Promise<SchedulingProvider> {
+  try {
+    const engine = await getSchedulingEngineType();
+    return createProviderByEngine(persistence, engine);
+  } catch {
+    const fallbackEngine = resolveLegacyEngineFromEnvironment();
+    return createProviderByEngine(persistence, fallbackEngine);
+  }
 }

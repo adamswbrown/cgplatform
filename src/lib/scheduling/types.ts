@@ -1,7 +1,7 @@
 import { Prisma } from "@prisma/client";
 
 export type SchedulingEventType = "individual" | "couple";
-export type SchedulingProviderType = "fake" | "calcom";
+export type SchedulingProviderType = "manual" | "calcom" | "microsoft_bookings";
 
 export type SchedulingCaseData = {
   caseId: string;
@@ -34,4 +34,7 @@ export interface SchedulingProvider {
   cancelBooking(bookingId: string): Promise<void>;
 }
 
-export type SchedulingPersistence = Pick<Prisma.TransactionClient, "session">;
+export type SchedulingPersistence = Pick<
+  Prisma.TransactionClient,
+  "session" | "specialistAvailabilityWindow"
+>;

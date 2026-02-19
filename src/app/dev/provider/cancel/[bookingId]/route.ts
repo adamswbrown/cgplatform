@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
+import { db } from "@/lib/db";
 import { handleProviderBookingEvent } from "@/lib/scheduling/events";
+import type { SchedulingProviderType } from "@/lib/scheduling/types";
 
 type CancelRouteContext = {
   params: Promise<{ bookingId: string }>;
@@ -12,8 +14,28 @@ export async function POST(_request: Request, context: CancelRouteContext) {
   }
 
   try {
+    const booking = await db.session.findUnique({
+      where: {
+        providerBookingId: bookingId.trim(),
+      },
+      select: {
+        providerType: true,
+      },
+    });
+
+    const allowedProviders: SchedulingProviderType[] = [
+      "manual",
+      "calcom",
+      "microsoft_bookings",
+    ];
+    const provider = allowedProviders.includes(
+      (booking?.providerType || "") as SchedulingProviderType,
+    )
+      ? (booking?.providerType as SchedulingProviderType)
+      : "manual";
+
     const result = await handleProviderBookingEvent({
-      provider: "fake",
+      provider,
       type: "booking.cancelled",
       bookingId: bookingId.trim(),
     });

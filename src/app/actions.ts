@@ -18,6 +18,7 @@ import {
   overrideCaseAssignment,
   transitionCaseStatus,
   updateSpecialistProfile,
+  updateWorkflowStep,
 } from "@/lib/case-service";
 import {
   destinationForUserRole,
@@ -25,6 +26,12 @@ import {
   signInWithPassword,
   signOut,
 } from "@/lib/auth";
+import {
+  getOperationalSettings,
+  normalizeIntakeSourceType,
+  normalizeSchedulingEngineType,
+  updateOperationalSettings,
+} from "@/lib/admin-settings";
 import { issueFormPin, issueIntakeAccessInvite, revokeFormPin } from "@/lib/form-access";
 import { updateIntakeFormContent } from "@/lib/intake-settings";
 import { sendFormPinEmail, sendIntakeAccessInviteEmail } from "@/lib/mailer";
@@ -80,6 +87,46 @@ function appendQuery(path: string, key: string, value: string) {
   return `${path}${separator}${encodeURIComponent(key)}=${encodeURIComponent(value)}`;
 }
 
+function parsePositiveIntegerField(
+  formData: FormData,
+  key: string,
+  label: string,
+) {
+  const raw = String(formData.get(key) || "").trim();
+  const value = Number(raw);
+  if (!raw || !Number.isFinite(value) || value <= 0) {
+    throw new Error(`${label} must be a positive number.`);
+  }
+
+  return Math.round(value);
+}
+
+function parseIntegerField(
+  formData: FormData,
+  key: string,
+  label: string,
+  options: {
+    min?: number;
+    max?: number;
+  } = {},
+) {
+  const raw = String(formData.get(key) || "").trim();
+  const value = Number(raw);
+  if (!raw || !Number.isFinite(value)) {
+    throw new Error(`${label} must be a number.`);
+  }
+
+  const rounded = Math.round(value);
+  if (typeof options.min === "number" && rounded < options.min) {
+    throw new Error(`${label} must be at least ${options.min}.`);
+  }
+  if (typeof options.max === "number" && rounded > options.max) {
+    throw new Error(`${label} must be at most ${options.max}.`);
+  }
+
+  return rounded;
+}
+
 export async function loginAction(formData: FormData) {
   const email = String(formData.get("email") || "").trim();
   const password = String(formData.get("password") || "").trim();
@@ -99,6 +146,7 @@ export async function logoutAction() {
 }
 
 export async function submitIntakeAction(formData: FormData) {
+  const operationalSettings = await getOperationalSettings();
   const parsed = intakeSchema.safeParse({
     participantType: String(formData.get("participantType") || "single"),
     primaryFirstName: String(formData.get("primaryFirstName") || ""),
@@ -134,7 +182,7 @@ export async function submitIntakeAction(formData: FormData) {
         : undefined,
     notes: parsed.data.notes,
     initialStatus: CaseStatus.AWAITING_REVIEW,
-    intakeSource: "WEB_FORM",
+    intakeSource: operationalSettings.defaultIntakeSource,
     autoAllocate: false,
   });
 
@@ -213,6 +261,9 @@ export async function overrideAssignmentAction(formData: FormData) {
   const specialistId = String(formData.get("specialistId") || "");
   const reason = String(formData.get("reason") || "").trim();
   const matchingRuleOverride = String(formData.get("matchingRuleOverride") || "").trim();
+  const preferredTimeBlockRaw = String(formData.get("preferredTimeBlock") || "")
+    .trim()
+    .toUpperCase();
   const redirectTo = String(formData.get("redirectTo") || "/admin/cases");
 
   if (!reason) {
@@ -230,6 +281,12 @@ export async function overrideAssignmentAction(formData: FormData) {
       specialistId,
       reason,
       matchingRuleOverride: matchingRuleOverride || undefined,
+      preferredTimeBlock:
+        preferredTimeBlockRaw === "MORNING" ||
+        preferredTimeBlockRaw === "AFTERNOON" ||
+        preferredTimeBlockRaw === "EVENING"
+          ? preferredTimeBlockRaw
+          : undefined,
       actorUserId: user.id,
     });
 
@@ -271,7 +328,7 @@ export async function createSpecialistAction(formData: FormData) {
     redirect(
       encodeErrorPath(
         redirectTo,
-        "Couples event type id is required when specialist supports couples.",
+        "Couples event type id is required when counsellor supports couples.",
       ),
     );
   }
@@ -296,7 +353,7 @@ export async function createSpecialistAction(formData: FormData) {
       redirect(encodeErrorPath(redirectTo, error.message));
     }
 
-    redirect(encodeErrorPath(redirectTo, "Failed to create specialist."));
+    redirect(encodeErrorPath(redirectTo, "Failed to create counsellor."));
   }
 }
 
@@ -322,7 +379,7 @@ export async function updateSpecialistProfileAction(formData: FormData) {
     redirect(
       encodeErrorPath(
         redirectTo,
-        "Specialist id, name, email, Cal.com user id, and individual event type id are required.",
+        "Counsellor id, name, email, Cal.com user id, and individual event type id are required.",
       ),
     );
   }
@@ -331,7 +388,7 @@ export async function updateSpecialistProfileAction(formData: FormData) {
     redirect(
       encodeErrorPath(
         redirectTo,
-        "Couples event type id is required when specialist supports couples.",
+        "Couples event type id is required when counsellor supports couples.",
       ),
     );
   }
@@ -360,7 +417,7 @@ export async function updateSpecialistProfileAction(formData: FormData) {
     if (isDomainError(error)) {
       destination = encodeErrorPath(redirectTo, error.message);
     } else {
-      destination = encodeErrorPath(redirectTo, "Failed to update specialist profile.");
+      destination = encodeErrorPath(redirectTo, "Failed to update counsellor profile.");
     }
   }
 
@@ -377,16 +434,40 @@ export async function updateIntakeFormContentAction(formData: FormData) {
   let crisisContacts: unknown[];
   let availabilityNotes: unknown[];
 
-  try {
-    crisisContacts = JSON.parse(crisisContactsRaw || "[]");
-  } catch {
-    redirect(encodeErrorPath(redirectTo, "Crisis contacts JSON is invalid."));
+  if (crisisContactsRaw) {
+    try {
+      crisisContacts = JSON.parse(crisisContactsRaw || "[]");
+    } catch {
+      redirect(encodeErrorPath(redirectTo, "Crisis contacts data is invalid."));
+    }
+  } else {
+    const labels = formData.getAll("crisisContactLabel").map((value) => String(value).trim());
+    const phones = formData.getAll("crisisContactPhone").map((value) => String(value).trim());
+    const descriptions = formData
+      .getAll("crisisContactDescription")
+      .map((value) => String(value).trim());
+
+    crisisContacts = labels.map((label, index) => ({
+      label,
+      phone: phones[index] || "",
+      description: descriptions[index] || "",
+    }));
   }
 
-  try {
-    availabilityNotes = JSON.parse(availabilityNotesRaw || "[]");
-  } catch {
-    redirect(encodeErrorPath(redirectTo, "Availability notes JSON is invalid."));
+  if (availabilityNotesRaw) {
+    try {
+      availabilityNotes = JSON.parse(availabilityNotesRaw || "[]");
+    } catch {
+      redirect(encodeErrorPath(redirectTo, "Availability notes data is invalid."));
+    }
+  } else {
+    const titles = formData.getAll("availabilityNoteTitle").map((value) => String(value).trim());
+    const bodies = formData.getAll("availabilityNoteBody").map((value) => String(value).trim());
+
+    availabilityNotes = titles.map((title, index) => ({
+      title,
+      body: bodies[index] || "",
+    }));
   }
 
   try {
@@ -428,16 +509,146 @@ export async function updateIntakeFormContentAction(formData: FormData) {
   redirect(appendQuery("/admin/settings/intake", "saved", "1"));
 }
 
+export async function updateOperationalSettingsAction(formData: FormData) {
+  const user = await requirePageUser([UserRole.OPS]);
+  const redirectTo = String(formData.get("redirectTo") || "/admin/settings/operations");
+
+  try {
+    const schedulingAssignmentMode = String(
+      formData.get("schedulingAssignmentMode") || "",
+    ).trim();
+    if (schedulingAssignmentMode !== "manual" && schedulingAssignmentMode !== "auto") {
+      redirect(encodeErrorPath(redirectTo, "Scheduling assignment mode is invalid."));
+    }
+    const schedulingEngineType = normalizeSchedulingEngineType(
+      String(formData.get("schedulingEngineType") || ""),
+    );
+    if (!schedulingEngineType) {
+      redirect(encodeErrorPath(redirectTo, "Scheduling engine type is invalid."));
+    }
+    const defaultIntakeSource = normalizeIntakeSourceType(
+      String(formData.get("defaultIntakeSource") || ""),
+    );
+    if (!defaultIntakeSource) {
+      redirect(encodeErrorPath(redirectTo, "Default intake source is invalid."));
+    }
+
+    await updateOperationalSettings(
+      {
+        schedulingEngineType,
+        schedulingAssignmentMode,
+        defaultIntakeSource,
+        requireTermsBeforeInSession:
+          String(formData.get("requireTermsBeforeInSession") || "") === "on",
+        requireOuttakeBeforeClose:
+          String(formData.get("requireOuttakeBeforeClose") || "") === "on",
+        defaultIndividualSessionMinutes: parsePositiveIntegerField(
+          formData,
+          "defaultIndividualSessionMinutes",
+          "Default individual session minutes",
+        ),
+        defaultCoupleSessionMinutes: parsePositiveIntegerField(
+          formData,
+          "defaultCoupleSessionMinutes",
+          "Default couple session minutes",
+        ),
+        manualProviderHorizonDays: parsePositiveIntegerField(
+          formData,
+          "manualProviderHorizonDays",
+          "Manual provider horizon days",
+        ),
+        manualProviderSlotIncrementMinutes: parsePositiveIntegerField(
+          formData,
+          "manualProviderSlotIncrementMinutes",
+          "Manual provider slot increment minutes",
+        ),
+        manualProviderMorningStartHour: parseIntegerField(
+          formData,
+          "manualProviderMorningStartHour",
+          "Manual provider morning start hour",
+          {
+            min: 0,
+            max: 23,
+          },
+        ),
+        manualProviderMorningEndHour: parseIntegerField(
+          formData,
+          "manualProviderMorningEndHour",
+          "Manual provider morning end hour",
+          {
+            min: 1,
+            max: 23,
+          },
+        ),
+        manualProviderAfternoonStartHour: parseIntegerField(
+          formData,
+          "manualProviderAfternoonStartHour",
+          "Manual provider afternoon start hour",
+          {
+            min: 0,
+            max: 23,
+          },
+        ),
+        manualProviderAfternoonEndHour: parseIntegerField(
+          formData,
+          "manualProviderAfternoonEndHour",
+          "Manual provider afternoon end hour",
+          {
+            min: 1,
+            max: 23,
+          },
+        ),
+        defaultFormPinExpiresHours: parsePositiveIntegerField(
+          formData,
+          "defaultFormPinExpiresHours",
+          "Form PIN default expiry",
+        ),
+        defaultFormPinMaxAttempts: parsePositiveIntegerField(
+          formData,
+          "defaultFormPinMaxAttempts",
+          "Form PIN default max attempts",
+        ),
+        defaultIntakeInviteExpiresHours: parsePositiveIntegerField(
+          formData,
+          "defaultIntakeInviteExpiresHours",
+          "Intake invite default expiry",
+        ),
+        defaultIntakeInviteMaxAttempts: parsePositiveIntegerField(
+          formData,
+          "defaultIntakeInviteMaxAttempts",
+          "Intake invite default max attempts",
+        ),
+        formAccessSessionHours: parsePositiveIntegerField(
+          formData,
+          "formAccessSessionHours",
+          "PIN access session hours",
+        ),
+      },
+      user.id,
+    );
+  } catch (error) {
+    redirect(encodeErrorPath(redirectTo, domainErrorMessage(error)));
+  }
+
+  revalidatePath("/admin/settings");
+  revalidatePath("/admin/settings/operations");
+  revalidatePath("/admin/cases");
+  revalidatePath("/intake");
+  redirect(appendQuery("/admin/settings/operations", "saved", "1"));
+}
+
 export async function assignCaseWorkflowAction(formData: FormData) {
   const user = await requirePageUser([UserRole.OPS]);
   const caseId = String(formData.get("caseId") || "").trim();
   const caseWorkflowTemplateId = String(formData.get("caseWorkflowTemplateId") || "").trim();
   const redirectTo = String(formData.get("redirectTo") || `/admin/cases/${caseId}`);
+  const redirectPathOnly = redirectTo.split("?")[0] || `/admin/cases/${caseId}`;
 
   if (!caseId || !caseWorkflowTemplateId) {
     redirect(encodeErrorPath(redirectTo, "Case and workflow template are required."));
   }
 
+  let destination = redirectTo;
   try {
     await assignWorkflowTemplateToCase({
       caseId,
@@ -447,11 +658,12 @@ export async function assignCaseWorkflowAction(formData: FormData) {
 
     revalidatePath("/admin/cases");
     revalidatePath("/admin/workflows");
-    revalidatePath(redirectTo);
-    redirect(redirectTo);
+    revalidatePath(redirectPathOnly);
   } catch (error) {
-    redirect(encodeErrorPath(redirectTo, domainErrorMessage(error)));
+    destination = encodeErrorPath(redirectTo, domainErrorMessage(error));
   }
+
+  redirect(destination);
 }
 
 export async function issueFormPinAction(formData: FormData) {
@@ -700,6 +912,53 @@ export async function addWorkflowStepAction(formData: FormData) {
 
   try {
     await addWorkflowStep({
+      caseWorkflowTemplateId,
+      name,
+      type: typeParsed.data,
+      formType: formType || undefined,
+      required,
+      blocksScheduling,
+      sortOrder: Math.round(sortOrder),
+      actorUserId: user.id,
+    });
+
+    revalidatePath("/admin/workflows");
+    revalidatePath("/admin/cases");
+    redirect(redirectTo);
+  } catch (error) {
+    redirect(encodeErrorPath(redirectTo, domainErrorMessage(error)));
+  }
+}
+
+export async function updateWorkflowStepAction(formData: FormData) {
+  const user = await requirePageUser([UserRole.OPS]);
+  const workflowStepId = String(formData.get("workflowStepId") || "").trim();
+  const caseWorkflowTemplateId = String(formData.get("caseWorkflowTemplateId") || "").trim();
+  const name = String(formData.get("name") || "").trim();
+  const typeRaw = String(formData.get("type") || "").trim().toUpperCase();
+  const formType = String(formData.get("formType") || "").trim();
+  const required = String(formData.get("required") || "") === "on";
+  const blocksScheduling = String(formData.get("blocksScheduling") || "") === "on";
+  const sortOrderRaw = String(formData.get("sortOrder") || "").trim();
+  const redirectTo = String(formData.get("redirectTo") || "/admin/workflows");
+
+  if (!workflowStepId || !caseWorkflowTemplateId || !name) {
+    redirect(encodeErrorPath(redirectTo, "Workflow template, step id, and step name are required."));
+  }
+
+  const typeParsed = workflowStepTypeSchema.safeParse(typeRaw);
+  if (!typeParsed.success) {
+    redirect(encodeErrorPath(redirectTo, "Invalid workflow step type."));
+  }
+
+  const sortOrder = sortOrderRaw ? Number(sortOrderRaw) : 0;
+  if (!Number.isFinite(sortOrder)) {
+    redirect(encodeErrorPath(redirectTo, "Sort order must be a number."));
+  }
+
+  try {
+    await updateWorkflowStep({
+      workflowStepId,
       caseWorkflowTemplateId,
       name,
       type: typeParsed.data,

@@ -21,7 +21,7 @@ export default defineConfig({
   },
   webServer: {
     command:
-      "SCHEDULING_PROVIDER=fake sh -c 'npx next build && npx next start --hostname 127.0.0.1 --port 3011'",
+      "SCHEDULING_ENGINE=manual SCHEDULING_ASSIGNMENT_MODE=auto sh -c 'npx next build && npx next start --hostname 127.0.0.1 --port 3011'",
     url: baseURL,
     timeout: 120_000,
     reuseExistingServer: false,

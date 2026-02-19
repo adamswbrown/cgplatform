@@ -7,7 +7,7 @@ import {
 
 const providerEventSchema = z
   .object({
-    provider: z.enum(["fake", "calcom"]),
+    provider: z.enum(["manual", "calcom", "microsoft_bookings"]),
     type: z.enum(["booking.created", "booking.cancelled", "booking.rescheduled"]),
     bookingId: z.string().min(1),
     startTime: z.string().optional(),

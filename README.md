@@ -4,9 +4,10 @@ This app is the workflow/operations brain for a counselling service.
 
 - Cases are created from intake submissions.
 - Each case is assigned a counselling workflow template.
-- Scheduling is provider-driven (`fake` now, `calcom` placeholder) and blocked until required workflow steps are complete.
+- Scheduling is provider-driven (`manual` deterministic engine now, with `calcom` and `microsoft_bookings` options) and blocked until required workflow steps are complete.
+- Assignment mode is configurable (manual ops assignment or auto allocation).
 - Terms of Counselling is issued after booking and must be completed before moving a case into `IN_SESSION`.
-- Intake is a secure, non-public "Application for Counselling" multi-step JotForm-aligned flow with safeguarding checks, signature capture, provider-backed availability widget, and confirmation email support.
+- Intake is a secure, non-public "Application for Counselling" multi-step JotForm-aligned flow with safeguarding checks, signature capture, and time-of-day preference capture (`morning`, `afternoon`, `evening`).
 - PIN-gated secure forms are supported for time-sensitive controlled access.
 
 ## Architecture Contract
@@ -14,6 +15,27 @@ This app is the workflow/operations brain for a counselling service.
 - App owns: case lifecycle, workflow compliance, assignment, and audit logs.
 - Scheduling provider owns: booking slot truth and booking creation.
 - The app must not schedule if workflow blocking steps are incomplete.
+
+## Administrative Settings
+
+Ops can update operational defaults without code changes under `/admin/settings`.
+
+Exposed runtime settings:
+
+- Scheduling engine type (`manual`, `calcom`, `microsoft_bookings`)
+- Scheduling assignment mode (`manual` or `auto`)
+- Default individual session length
+- Default couples session length
+- Workflow gate toggles
+  - require Terms before `IN_SESSION`
+  - require Outtake before `CLOSED`
+- Manual-engine simulation policy
+  - slot horizon (days)
+  - slot increment (minutes)
+  - morning/afternoon window start/end hours
+- Form PIN default expiry and max attempts
+- Intake invite default expiry and max attempts
+- PIN access session length (cookie/session cutoff)
 
 ## Workflow Engine
 
@@ -50,13 +72,26 @@ interface SchedulingProvider {
 
 Provider implementations:
 
-- `FakeSchedulingProvider` (`src/lib/scheduling/fake-provider.ts`)
+- Manual engine (deterministic simulation) via `ManualSchedulingProvider` (`src/lib/scheduling/manual-provider.ts`)
 - `CalcomSchedulingProvider` placeholder (`src/lib/scheduling/calcom-provider.ts`)
+- `MicrosoftBookingsSchedulingProvider` placeholder (`src/lib/scheduling/microsoft-bookings-provider.ts`)
 
 Factory:
 
 - `src/lib/scheduling/index.ts`
-- env switch: `SCHEDULING_PROVIDER=fake|calcom`
+- settings switch: `/admin/settings/operations` -> Scheduling engine
+- env fallback: `SCHEDULING_ENGINE` or legacy `SCHEDULING_PROVIDER`
+
+Assignment mode switch:
+
+- `src/lib/scheduling/config.ts`
+- env switch: `SCHEDULING_ASSIGNMENT_MODE=manual|auto`
+- default: `manual`
+
+Mode behavior:
+
+- `manual` (MVP default): intake stores time-of-day preferences and ops assigns specialists manually.
+- `auto`: availability-window overlap matching is enforced and auto-allocation can be run.
 
 External provider compatibility:
 
@@ -77,9 +112,10 @@ Scheduling is rejected unless all required blocking workflow steps are completed
 
 - Service-layer enforcement in case allocation/override (`src/lib/case-service.ts`).
 - Rejection message: `Case not eligible for scheduling`.
-- Availability policy lock-in: `separate participant submissions with overlap required`.
+- Availability policy lock-in in `auto` mode: `separate participant submissions with overlap required`.
   - Singles: one participant availability submission required.
   - Couples: each participant submits separately, and scheduling is only eligible when submitted windows overlap for the required session duration.
+- In `manual` mode, assignments use intake time-of-day preferences (`morning`, `afternoon`, `evening`) instead of overlap windows.
 
 ## Form Ingestion Endpoint
 
@@ -193,6 +229,12 @@ npm run db:seed
 npm run dev
 ```
 
+4. Optional: enable auto allocation mode
+
+```bash
+SCHEDULING_ASSIGNMENT_MODE=auto npm run dev
+```
+
 ## Demo Credentials
 
 - Ops: `ops@demo.local / password123`
@@ -218,11 +260,14 @@ After `npm run db:seed`, deterministic PIN links are created for quick manual te
 ## Ops Screens
 
 - `/admin/cases`
+- `/admin/assignments` (Kanban drag/drop manual assignment board: unassigned -> specialist morning/afternoon/evening lanes)
 - `/admin/cases/[id]` (lifecycle controls, manual override, and provider availability snapshot across all active counsellors)
 - `/admin/clients`
 - `/admin/specialists`
 - `/admin/specialists/[id]`
 - `/admin/workflows` (design templates/steps)
+- `/admin/settings` (administrative settings hub)
+- `/admin/settings/operations` (scheduling engine + mode, workflow gates, manual-engine simulation constants, and PIN policy defaults)
 - `/admin/settings/intake` (edit crisis modal + availability guidance content)
 
 Client-facing secure forms:
@@ -268,10 +313,10 @@ Specialist:
 3. Client submits intake form.
 4. Case is created in pending review and assigned a workflow template.
 5. External form completions are ingested via `/forms/submission`.
-6. Clients submit availability via the intake widget (provider-backed slots) and `/availability/submission`.
-7. Workflow remains blocked until overlap exists for all required participants.
-8. Once blocking workflow steps are complete, ops can run allocation.
-9. Scheduler books the earliest eligible slot and case moves to `SCHEDULED`.
+6. Clients submit location + notes + preferred times (`morning`, `afternoon`, `evening`) in intake.
+7. Workflow remains blocked until required blocking steps are complete.
+8. In manual mode, ops uses `/admin/assignments` to drag cases from `Unassigned` into specialist time blocks (`Morning`, `Afternoon`, `Evening`), and the system books the earliest matching 60-minute slot between `09:00` and `18:00`.
+9. In auto mode, overlap-based allocation books the earliest eligible slot.
 10. Terms of Counselling is sent after booking; case cannot transition to `IN_SESSION` until terms is completed.
 
 ## Persona Workflows
@@ -280,7 +325,7 @@ Specialist:
 
 1. Receive a secure intake invite from ops (`/intake/access/:accessKey` + PIN).
 2. Verify PIN, then complete the multi-step "Application for Counselling" form.
-3. Submit availability selections and notes in the intake journey.
+3. Submit location, notes, and time-of-day preferences in the intake journey.
 4. Receive confirmation that the case is in review and pending allocation.
 5. Receive secure PIN-gated follow-up forms (for example Terms of Counselling) when issued by ops.
 6. Complete Terms after booking; this is required before the case can progress to `IN_SESSION`.
@@ -290,7 +335,7 @@ Specialist:
 1. Issue secure intake invites and PINs from the ops case area.
 2. Review case details, workflow blockers, submitted forms, documents, and audit logs.
 3. View provider availability across all active counsellors in case detail.
-4. Run auto allocation or manually override specialist assignment.
+4. In manual mode (default), assign specialist manually; in auto mode, run auto allocation or manual override.
 5. Transition case statuses through lifecycle stages when gate conditions are met.
 6. Issue and disable PIN-gated form access links for participants.
 7. Manage specialist profiles, capabilities, and provider mapping fields.
@@ -309,30 +354,35 @@ flowchart TD
   B["End Client: Open intake access link and verify PIN"]
   C["End Client: Submit Application for Counselling"]
   D["System: Create case in AWAITING_REVIEW, assign workflow, complete intake step"]
-  E["End Client(s): Submit availability windows"]
-  F["System: Recompute overlap and scheduling eligibility"]
+  E["End Client(s): Submit location + preferred times (morning, afternoon, evening)"]
+  F["System: Recompute workflow scheduling eligibility"]
   G{"System: All blocking workflow steps complete?"}
   H["Ops Manager: Review case detail and counsellor availability snapshot"]
-  I["Ops Manager: Auto-allocate or manual override specialist"]
-  J["Scheduling Provider: Return available slots"]
-  K["System: Book earliest matching slot, create session, set case SCHEDULED"]
-  L["System: Trigger/surface Terms of Counselling requirement"]
-  M["End Client: Complete Terms form (PIN-gated when active PIN exists)"]
-  N{"System: Terms document completed?"}
-  O["Ops Manager: Transition case to IN_SESSION, COMPLETED, then CLOSED"]
-  P["Counsellor: View My Sessions, Session Briefing, and My Clients"]
+  I{"Assignment mode"}
+  J["Ops Manager: Manual specialist assignment"]
+  K["System: Auto allocation with overlap matching"]
+  L["Scheduling Provider: Return available slots"]
+  M["System: Book earliest matching slot, create session, set case SCHEDULED"]
+  N["System: Trigger/surface Terms of Counselling requirement"]
+  O["End Client: Complete Terms form (PIN-gated when active PIN exists)"]
+  P{"System: Terms document completed?"}
+  Q["Ops Manager: Transition case to IN_SESSION, COMPLETED, then CLOSED"]
+  R["Counsellor: View My Sessions, Session Briefing, and My Clients"]
   X["Provider Event: booking.cancelled or booking.rescheduled"]
   Y["System: Apply provider event, update session/case, write audit log"]
 
   A --> B --> C --> D --> E --> F --> G
   G -- "No" --> E
-  G -- "Yes" --> H --> I --> J --> K --> L --> M --> N
-  N -- "No" --> M
-  N -- "Yes" --> O
-  K --> P
+  G -- "Yes" --> H --> I
+  I -- "manual" --> J --> L --> M
+  I -- "auto" --> K --> L --> M
+  M --> N --> O --> P
+  P -- "No" --> O
+  P -- "Yes" --> Q
+  M --> R
   X --> Y
   Y -- "Cancelled: case returns to READY_TO_SCHEDULE" --> H
-  Y -- "Rescheduled: case remains SCHEDULED" --> P
+  Y -- "Rescheduled: case remains SCHEDULED" --> R
 ```
 
 ## PIN-Gated Forms
