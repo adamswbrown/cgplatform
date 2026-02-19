@@ -176,21 +176,21 @@ export function AuthenticatedShell({
 
   return (
     <div className="min-h-screen">
-      <section className="cg-section cg-theme-black-bold">
+      <section className="cg-section cg-shell-hero cg-theme-black-bold">
         <header className="cg-container cg-gutters">
-          <div className="flex flex-wrap items-start justify-between gap-5">
+          <div className="flex flex-wrap items-start justify-between gap-4">
             <div className="max-w-3xl">
               <div className="flex items-start gap-3">
                 <Link
                   href={role === UserRole.OPS ? "/admin/cases" : "/specialist/sessions"}
-                  className="inline-flex w-fit rounded-2xl bg-white p-3 shadow-[0_10px_24px_rgba(5,46,30,0.15)]"
+                  className="inline-flex w-fit rounded-2xl bg-white p-2.5 shadow-[0_10px_24px_rgba(5,46,30,0.15)]"
                 >
-                  <BrandWordmark className="h-8 w-auto" />
+                  <BrandWordmark className="h-7 w-auto" />
                 </Link>
               </div>
-              <p className="cg-nav-label mt-4">{roleLabel(role)}</p>
-              <h1 className="mt-2">{title}</h1>
-              <p className="mt-3 text-sm font-normal text-white/80">{subtitle}</p>
+              <p className="cg-nav-label mt-3">{roleLabel(role)}</p>
+              <h1 className="mt-1 text-[clamp(2.1rem,4.2vw,3.35rem)]">{title}</h1>
+              <p className="mt-2 text-sm font-normal text-white/80">{subtitle}</p>
             </div>
             <div className="flex items-center gap-3">
               <details className="group relative">
@@ -240,12 +240,12 @@ export function AuthenticatedShell({
             </div>
           </div>
 
-          <nav className="mt-6 border-t border-white/20 pt-3">
-            <div className="flex flex-wrap gap-6">
+          <nav className="mt-4 border-t border-white/20 pt-2">
+            <div className="flex flex-wrap gap-4">
               {primaryNavGroups.map((group) => (
                 <section key={group.label} aria-label={`${group.label} navigation`}>
                   <p className="cg-nav-label text-white/60">{group.label}</p>
-                  <ul className="mt-1 flex flex-wrap gap-x-5 gap-y-2">
+                  <ul className="mt-1 flex flex-wrap gap-x-4 gap-y-1.5">
                     {group.items.map((item) => (
                       <li key={item.href}>
                         <Link

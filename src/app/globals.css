@@ -141,6 +141,10 @@ a:focus-visible {
   padding-block: clamp(2.5rem, 6vw, 5rem);
 }
 
+.cg-shell-hero {
+  padding-block: clamp(1.15rem, 2.1vw, 2rem);
+}
+
 .cg-theme-black-bold,
 .black-bold {
   background: var(--cg-ink);
@@ -290,5 +294,9 @@ a:focus-visible {
 
   h2 {
     font-size: 1.6rem;
+  }
+
+  .cg-shell-hero {
+    padding-block: 1rem 1.25rem;
   }
 }
