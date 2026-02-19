@@ -5,6 +5,7 @@ import {
   Prisma,
   SessionStatus,
   UserRole,
+  WorkflowStepCode,
 } from "@prisma/client";
 import { getOperationalSettings, normalizeIntakeSourceType } from "@/lib/admin-settings";
 import { db } from "@/lib/db";
@@ -88,6 +89,7 @@ export type IntakeSubmissionInput = {
 
 const ACTIVE_SESSION_STATUSES = [SessionStatus.SCHEDULED, SessionStatus.IN_SESSION];
 const AVAILABILITY_SUBMISSION_FORM_TYPE = "AVAILABILITY_SUBMISSION";
+const AVAILABILITY_CAPTURED_STEP_CODE: WorkflowStepCode = WorkflowStepCode.AVAILABILITY_CAPTURED;
 const TERMS_SUBMISSION_ALLOWED_STATUSES: CaseStatus[] = [
   CaseStatus.SCHEDULED,
   CaseStatus.IN_SESSION,
@@ -275,8 +277,30 @@ async function resolveWorkflowForCase(
   return fallbackActive as WorkflowSummary;
 }
 
-function stepRequiresAllParticipants(stepName: string) {
-  return stepName.toLowerCase().includes("both participants");
+function workflowStepCodeForFormType(formType: string): WorkflowStepCode | null {
+  const normalized = normalizeFormType(formType);
+
+  switch (normalized) {
+    case "INTAKE_FORM":
+      return WorkflowStepCode.INTAKE_FORM;
+    case "TERMS_AND_CONDITIONS":
+      return WorkflowStepCode.TERMS_AND_CONDITIONS;
+    case "CONSENT_FORM":
+      return WorkflowStepCode.CONSENT_FORM;
+    case "AGREEMENT_FORM":
+      return WorkflowStepCode.AGREEMENT_FORM;
+    case "OUTTAKE_FORM":
+      return WorkflowStepCode.OUTTAKE_FORM;
+    default:
+      return null;
+  }
+}
+
+function stepRequiresAllParticipants(step: {
+  requiresAllParticipants?: boolean | null;
+  name: string;
+}) {
+  return Boolean(step.requiresAllParticipants) || step.name.toLowerCase().includes("both participants");
 }
 
 function normalizeParticipantIdentifier(identifier: string) {
@@ -4014,8 +4038,10 @@ export async function addWorkflowStep(input: {
   caseWorkflowTemplateId: string;
   name: string;
   type: "FORM" | "REVIEW" | "SYSTEM";
+  stepCode?: WorkflowStepCode | null;
   formType?: string;
   required?: boolean;
+  requiresAllParticipants?: boolean;
   blocksScheduling?: boolean;
   sortOrder?: number;
   actorUserId: string;
@@ -4038,8 +4064,10 @@ export async function addWorkflowStep(input: {
       templateId: input.caseWorkflowTemplateId,
       name: input.name.trim(),
       type: input.type,
-      formType: input.formType?.trim() || null,
+      stepCode: input.stepCode ?? null,
+      formType: input.type === "FORM" ? input.formType?.trim() || null : null,
       required: input.required ?? true,
+      requiresAllParticipants: input.requiresAllParticipants ?? false,
       blocksScheduling: input.blocksScheduling ?? false,
       sortOrder: input.sortOrder ?? 0,
     },
@@ -4064,8 +4092,10 @@ export async function updateWorkflowStep(input: {
   caseWorkflowTemplateId: string;
   name: string;
   type: "FORM" | "REVIEW" | "SYSTEM";
+  stepCode?: WorkflowStepCode | null;
   formType?: string;
   required?: boolean;
+  requiresAllParticipants?: boolean;
   blocksScheduling?: boolean;
   sortOrder?: number;
   actorUserId: string;
@@ -4079,8 +4109,10 @@ export async function updateWorkflowStep(input: {
       templateId: true,
       name: true,
       type: true,
+      stepCode: true,
       formType: true,
       required: true,
+      requiresAllParticipants: true,
       blocksScheduling: true,
       sortOrder: true,
     },
@@ -4099,7 +4131,7 @@ export async function updateWorkflowStep(input: {
     throw new DomainError("Workflow step name is required.", 409);
   }
 
-  const normalizedFormType = input.formType?.trim() || null;
+  const normalizedFormType = input.type === "FORM" ? input.formType?.trim() || null : null;
   const normalizedSortOrder = input.sortOrder ?? 0;
 
   const updated = await db.caseWorkflowStep.update({
@@ -4109,8 +4141,10 @@ export async function updateWorkflowStep(input: {
     data: {
       name: normalizedName,
       type: input.type,
+      stepCode: input.stepCode ?? null,
       formType: normalizedFormType,
       required: input.required ?? true,
+      requiresAllParticipants: input.requiresAllParticipants ?? false,
       blocksScheduling: input.blocksScheduling ?? false,
       sortOrder: normalizedSortOrder,
     },
@@ -4126,16 +4160,20 @@ export async function updateWorkflowStep(input: {
         before: {
           name: existing.name,
           type: existing.type,
+          stepCode: existing.stepCode,
           formType: existing.formType,
           required: existing.required,
+          requiresAllParticipants: existing.requiresAllParticipants,
           blocksScheduling: existing.blocksScheduling,
           sortOrder: existing.sortOrder,
         },
         after: {
           name: updated.name,
           type: updated.type,
+          stepCode: updated.stepCode,
           formType: updated.formType,
           required: updated.required,
+          requiresAllParticipants: updated.requiresAllParticipants,
           blocksScheduling: updated.blocksScheduling,
           sortOrder: updated.sortOrder,
         },
@@ -4473,19 +4511,32 @@ export async function ingestAvailabilitySubmission(input: {
       where: {
         caseId: refreshedCase.id,
         step: {
-          type: "FORM",
           OR: [
             {
-              formType: {
-                equals: AVAILABILITY_SUBMISSION_FORM_TYPE,
-                mode: "insensitive",
-              },
+              stepCode: AVAILABILITY_CAPTURED_STEP_CODE,
             },
             {
-              name: {
-                equals: AVAILABILITY_SUBMISSION_FORM_TYPE,
-                mode: "insensitive",
-              },
+              AND: [
+                {
+                  type: "FORM",
+                },
+                {
+                  OR: [
+                    {
+                      formType: {
+                        equals: AVAILABILITY_SUBMISSION_FORM_TYPE,
+                        mode: "insensitive",
+                      },
+                    },
+                    {
+                      name: {
+                        equals: AVAILABILITY_SUBMISSION_FORM_TYPE,
+                        mode: "insensitive",
+                      },
+                    },
+                  ],
+                },
+              ],
             },
           ],
         },
@@ -4673,19 +4724,32 @@ export async function ingestAvailabilityPreferenceSubmission(input: {
       where: {
         caseId: caseRecord.id,
         step: {
-          type: "FORM",
           OR: [
             {
-              formType: {
-                equals: AVAILABILITY_SUBMISSION_FORM_TYPE,
-                mode: "insensitive",
-              },
+              stepCode: AVAILABILITY_CAPTURED_STEP_CODE,
             },
             {
-              name: {
-                equals: AVAILABILITY_SUBMISSION_FORM_TYPE,
-                mode: "insensitive",
-              },
+              AND: [
+                {
+                  type: "FORM",
+                },
+                {
+                  OR: [
+                    {
+                      formType: {
+                        equals: AVAILABILITY_SUBMISSION_FORM_TYPE,
+                        mode: "insensitive",
+                      },
+                    },
+                    {
+                      name: {
+                        equals: AVAILABILITY_SUBMISSION_FORM_TYPE,
+                        mode: "insensitive",
+                      },
+                    },
+                  ],
+                },
+              ],
             },
           ],
         },
@@ -4697,7 +4761,7 @@ export async function ingestAvailabilityPreferenceSubmission(input: {
     });
 
     if (availabilityStep) {
-      const requiresAllParticipants = stepRequiresAllParticipants(availabilityStep.step.name);
+      const requiresAllParticipants = stepRequiresAllParticipants(availabilityStep.step);
       const existingParticipantCompletions = Array.isArray(
         (availabilityStep.metadata as { participantsCompleted?: unknown } | null)
           ?.participantsCompleted,
@@ -4858,6 +4922,28 @@ export async function ingestFormSubmission(input: {
         409,
       );
     }
+    const formStepCode = workflowStepCodeForFormType(formType);
+    const formStepMatcher = [
+      ...(formStepCode
+        ? [
+            {
+              stepCode: formStepCode,
+            },
+          ]
+        : []),
+      {
+        formType: {
+          equals: formType,
+          mode: "insensitive" as const,
+        },
+      },
+      {
+        name: {
+          equals: formType,
+          mode: "insensitive" as const,
+        },
+      },
+    ];
 
     const pendingState = await tx.caseWorkflowState.findFirst({
       where: {
@@ -4865,20 +4951,7 @@ export async function ingestFormSubmission(input: {
         status: "PENDING",
         step: {
           type: "FORM",
-          OR: [
-            {
-              formType: {
-                equals: formType,
-                mode: "insensitive",
-              },
-            },
-            {
-              name: {
-                equals: formType,
-                mode: "insensitive",
-              },
-            },
-          ],
+          OR: formStepMatcher,
         },
       },
       include: {
@@ -4893,20 +4966,7 @@ export async function ingestFormSubmission(input: {
         status: "COMPLETED",
         step: {
           type: "FORM",
-          OR: [
-            {
-              formType: {
-                equals: formType,
-                mode: "insensitive",
-              },
-            },
-            {
-              name: {
-                equals: formType,
-                mode: "insensitive",
-              },
-            },
-          ],
+          OR: formStepMatcher,
         },
       },
       include: {
@@ -4924,7 +4984,7 @@ export async function ingestFormSubmission(input: {
     }
 
     const participantCount = caseRecord.participants.length;
-    const requiresAllParticipants = stepRequiresAllParticipants(targetState.step.name);
+    const requiresAllParticipants = stepRequiresAllParticipants(targetState.step);
     const normalizedIdentifier = normalizeParticipantIdentifier(participantIdentifier);
     const existingParticipantCompletions = Array.isArray(
       (targetState.metadata as { participantsCompleted?: unknown } | null)?.participantsCompleted,

@@ -20,16 +20,18 @@ export default async function IntakePage({ searchParams }: IntakePageProps) {
   if (!accessKey) {
     return (
       <div className="min-h-screen">
-        <section className="cg-section cg-theme-dark-bold">
+        <section className="cg-section cg-shell-hero cg-theme-dark-bold">
           <div className="cg-container cg-gutters">
-            <header className="mx-auto w-full max-w-4xl p-7 text-white">
-              <div className="rounded-[30px] bg-white p-6 shadow-[0_16px_36px_rgba(5,46,30,0.16)]">
+            <header className="mx-auto w-full max-w-4xl py-2 text-white">
+              <div className="rounded-[30px] bg-white p-4 shadow-[0_16px_36px_rgba(5,46,30,0.16)]">
                 <BrandWordmark className="h-auto w-full" priority />
               </div>
 
-              <p className="cg-nav-label mt-6 text-center text-white/85">Application For Counselling</p>
-              <h1 className="mt-2 text-center">Secure Access Required</h1>
-              <p className="mx-auto mt-3 max-w-3xl text-center text-sm font-normal text-white/85">
+              <p className="cg-nav-label mt-3 text-center text-white/85">Application For Counselling</p>
+              <h1 className="mt-1 text-center text-[clamp(2rem,4.5vw,3.25rem)]">
+                Secure Access Required
+              </h1>
+              <p className="mx-auto mt-2 max-w-3xl text-center text-sm font-normal text-white/85">
                 This intake form is not public. Please use the secure link and PIN code sent to you by
                 email.
               </p>
@@ -66,16 +68,18 @@ export default async function IntakePage({ searchParams }: IntakePageProps) {
 
   return (
     <div className="min-h-screen">
-      <section className="cg-section cg-theme-dark-bold">
+      <section className="cg-section cg-shell-hero cg-theme-dark-bold">
         <div className="cg-container cg-gutters">
-          <header className="mx-auto w-full max-w-4xl p-7 text-white">
-            <div className="rounded-[30px] bg-white p-6 shadow-[0_16px_36px_rgba(5,46,30,0.16)]">
+          <header className="mx-auto w-full max-w-4xl py-2 text-white">
+            <div className="rounded-[30px] bg-white p-4 shadow-[0_16px_36px_rgba(5,46,30,0.16)]">
               <BrandWordmark className="h-auto w-full" priority />
             </div>
 
-            <p className="cg-nav-label mt-6 text-center text-white/85">Application For Counselling</p>
-            <h1 className="mt-2 text-center">Application for Counselling</h1>
-            <p className="mx-auto mt-3 max-w-3xl text-center text-sm font-normal text-white/85">
+            <p className="cg-nav-label mt-3 text-center text-white/85">Application For Counselling</p>
+            <h1 className="mt-1 text-center text-[clamp(2rem,4.5vw,3.25rem)]">
+              Application for Counselling
+            </h1>
+            <p className="mx-auto mt-2 max-w-3xl text-center text-sm font-normal text-white/85">
               Please complete each step. Operations will review your application, then match and
               allocate a counsellor as soon as one becomes available.
             </p>

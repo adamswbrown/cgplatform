@@ -1,6 +1,6 @@
 "use server";
 
-import { CaseStatus, UserRole } from "@prisma/client";
+import { CaseStatus, UserRole, WorkflowStepCode } from "@prisma/client";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { z } from "zod";
@@ -884,14 +884,25 @@ export async function createWorkflowTemplateAction(formData: FormData) {
 }
 
 const workflowStepTypeSchema = z.enum(["FORM", "REVIEW", "SYSTEM"]);
+const workflowStepCodeSchema = z.enum([
+  "INTAKE_FORM",
+  "AVAILABILITY_CAPTURED",
+  "TERMS_AND_CONDITIONS",
+  "CONSENT_FORM",
+  "AGREEMENT_FORM",
+  "OUTTAKE_FORM",
+  "CUSTOM",
+]);
 
 export async function addWorkflowStepAction(formData: FormData) {
   const user = await requirePageUser([UserRole.OPS]);
   const caseWorkflowTemplateId = String(formData.get("caseWorkflowTemplateId") || "").trim();
   const name = String(formData.get("name") || "").trim();
   const typeRaw = String(formData.get("type") || "").trim().toUpperCase();
+  const stepCodeRaw = String(formData.get("stepCode") || "").trim().toUpperCase();
   const formType = String(formData.get("formType") || "").trim();
   const required = String(formData.get("required") || "") === "on";
+  const requiresAllParticipants = String(formData.get("requiresAllParticipants") || "") === "on";
   const blocksScheduling = String(formData.get("blocksScheduling") || "") === "on";
   const sortOrderRaw = String(formData.get("sortOrder") || "").trim();
   const redirectTo = String(formData.get("redirectTo") || "/admin/workflows");
@@ -904,6 +915,10 @@ export async function addWorkflowStepAction(formData: FormData) {
   if (!typeParsed.success) {
     redirect(encodeErrorPath(redirectTo, "Invalid workflow step type."));
   }
+  const stepCodeParsed = stepCodeRaw ? workflowStepCodeSchema.safeParse(stepCodeRaw) : null;
+  if (stepCodeRaw && stepCodeParsed && !stepCodeParsed.success) {
+    redirect(encodeErrorPath(redirectTo, "Invalid workflow step code."));
+  }
 
   const sortOrder = sortOrderRaw ? Number(sortOrderRaw) : 0;
   if (!Number.isFinite(sortOrder)) {
@@ -915,8 +930,10 @@ export async function addWorkflowStepAction(formData: FormData) {
       caseWorkflowTemplateId,
       name,
       type: typeParsed.data,
+      stepCode: stepCodeParsed?.success ? (stepCodeParsed.data as WorkflowStepCode) : undefined,
       formType: formType || undefined,
       required,
+      requiresAllParticipants,
       blocksScheduling,
       sortOrder: Math.round(sortOrder),
       actorUserId: user.id,
@@ -936,8 +953,10 @@ export async function updateWorkflowStepAction(formData: FormData) {
   const caseWorkflowTemplateId = String(formData.get("caseWorkflowTemplateId") || "").trim();
   const name = String(formData.get("name") || "").trim();
   const typeRaw = String(formData.get("type") || "").trim().toUpperCase();
+  const stepCodeRaw = String(formData.get("stepCode") || "").trim().toUpperCase();
   const formType = String(formData.get("formType") || "").trim();
   const required = String(formData.get("required") || "") === "on";
+  const requiresAllParticipants = String(formData.get("requiresAllParticipants") || "") === "on";
   const blocksScheduling = String(formData.get("blocksScheduling") || "") === "on";
   const sortOrderRaw = String(formData.get("sortOrder") || "").trim();
   const redirectTo = String(formData.get("redirectTo") || "/admin/workflows");
@@ -949,6 +968,10 @@ export async function updateWorkflowStepAction(formData: FormData) {
   const typeParsed = workflowStepTypeSchema.safeParse(typeRaw);
   if (!typeParsed.success) {
     redirect(encodeErrorPath(redirectTo, "Invalid workflow step type."));
+  }
+  const stepCodeParsed = stepCodeRaw ? workflowStepCodeSchema.safeParse(stepCodeRaw) : null;
+  if (stepCodeRaw && stepCodeParsed && !stepCodeParsed.success) {
+    redirect(encodeErrorPath(redirectTo, "Invalid workflow step code."));
   }
 
   const sortOrder = sortOrderRaw ? Number(sortOrderRaw) : 0;
@@ -962,8 +985,10 @@ export async function updateWorkflowStepAction(formData: FormData) {
       caseWorkflowTemplateId,
       name,
       type: typeParsed.data,
+      stepCode: stepCodeParsed?.success ? (stepCodeParsed.data as WorkflowStepCode) : undefined,
       formType: formType || undefined,
       required,
+      requiresAllParticipants,
       blocksScheduling,
       sortOrder: Math.round(sortOrder),
       actorUserId: user.id,

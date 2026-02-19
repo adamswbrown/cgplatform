@@ -15,11 +15,11 @@ export default async function IntakeSuccessPage({ searchParams }: IntakeSuccessP
 
   return (
     <div className="min-h-screen">
-      <section className="cg-section cg-theme-dark-bold">
+      <section className="cg-section cg-shell-hero cg-theme-dark-bold">
         <div className="cg-container cg-gutters">
           <div className="mx-auto w-full max-w-3xl">
             <p className="cg-nav-label text-white/85">Submission Complete</p>
-            <h1 className="mt-2">Intake submitted</h1>
+            <h1 className="mt-1 text-[clamp(2rem,4.4vw,3.2rem)]">Intake submitted</h1>
           </div>
         </div>
       </section>

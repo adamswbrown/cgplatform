@@ -50,6 +50,33 @@ function parseDateOrDefault(value, fallback) {
   return Number.isNaN(parsed.getTime()) ? fallback : parsed;
 }
 
+function normalizeCompletionToken(value) {
+  const normalized = String(value || "")
+    .trim()
+    .toUpperCase();
+  if (!normalized) {
+    return "";
+  }
+
+  if (normalized === "AVAILABILITY_CAPTURED") {
+    return "AVAILABILITY_SUBMISSION";
+  }
+
+  return normalized;
+}
+
+function resolveStepCompletionToken(step) {
+  if (step?.stepCode) {
+    return normalizeCompletionToken(step.stepCode);
+  }
+
+  if (step?.formType) {
+    return normalizeCompletionToken(step.formType);
+  }
+
+  return "";
+}
+
 function toCaseStatus(value, fallback = CaseStatus.NEW) {
   const normalized = String(value || "")
     .trim()
@@ -345,10 +372,11 @@ async function applyUserSeedConfig(input) {
     }
 
     const completedFormTypes = Array.isArray(caseSeed.completedFormTypes)
-      ? caseSeed.completedFormTypes.map((formType) => String(formType).trim().toUpperCase())
+      ? caseSeed.completedFormTypes.map((formType) => normalizeCompletionToken(formType))
       : [];
     for (const step of templateSteps) {
-      if (!step.formType || !completedFormTypes.includes(step.formType)) {
+      const stepCompletionToken = resolveStepCompletionToken(step);
+      if (!stepCompletionToken || !completedFormTypes.includes(stepCompletionToken)) {
         continue;
       }
 
@@ -363,6 +391,7 @@ async function applyUserSeedConfig(input) {
           metadata: {
             source: "seed.user",
             formType: step.formType,
+            stepCode: step.stepCode || null,
           },
         },
       });
@@ -817,27 +846,32 @@ async function main() {
     {
       templateId: generalWorkflow.id,
       name: "Intake form",
+      stepCode: "INTAKE_FORM",
       formType: "INTAKE_FORM",
       type: "FORM",
       required: true,
+      requiresAllParticipants: false,
       blocksScheduling: true,
       sortOrder: 10,
     },
     {
       templateId: generalWorkflow.id,
-      name: "Availability submission",
-      formType: "AVAILABILITY_SUBMISSION",
-      type: "FORM",
+      name: "Availability captured from intake",
+      stepCode: "AVAILABILITY_CAPTURED",
+      type: "SYSTEM",
       required: true,
+      requiresAllParticipants: false,
       blocksScheduling: true,
       sortOrder: 20,
     },
     {
       templateId: generalWorkflow.id,
       name: "Terms & conditions",
+      stepCode: "TERMS_AND_CONDITIONS",
       formType: "TERMS_AND_CONDITIONS",
       type: "FORM",
       required: true,
+      requiresAllParticipants: false,
       blocksScheduling: false,
       sortOrder: 30,
     },
@@ -847,45 +881,54 @@ async function main() {
     {
       templateId: couplesWorkflow.id,
       name: "Intake form (both participants)",
+      stepCode: "INTAKE_FORM",
       formType: "INTAKE_FORM",
       type: "FORM",
       required: true,
+      requiresAllParticipants: true,
       blocksScheduling: true,
       sortOrder: 10,
     },
     {
       templateId: couplesWorkflow.id,
       name: "Consent form (both participants)",
+      stepCode: "CONSENT_FORM",
       formType: "CONSENT_FORM",
       type: "FORM",
       required: true,
+      requiresAllParticipants: true,
       blocksScheduling: true,
       sortOrder: 20,
     },
     {
       templateId: couplesWorkflow.id,
       name: "Agreement form",
+      stepCode: "AGREEMENT_FORM",
       formType: "AGREEMENT_FORM",
       type: "FORM",
       required: true,
+      requiresAllParticipants: true,
       blocksScheduling: true,
       sortOrder: 30,
     },
     {
       templateId: couplesWorkflow.id,
-      name: "Availability submission (both participants)",
-      formType: "AVAILABILITY_SUBMISSION",
-      type: "FORM",
+      name: "Availability captured from intake (both participants)",
+      stepCode: "AVAILABILITY_CAPTURED",
+      type: "SYSTEM",
       required: true,
+      requiresAllParticipants: true,
       blocksScheduling: true,
       sortOrder: 40,
     },
     {
       templateId: couplesWorkflow.id,
       name: "Terms & conditions (both participants)",
+      stepCode: "TERMS_AND_CONDITIONS",
       formType: "TERMS_AND_CONDITIONS",
       type: "FORM",
       required: true,
+      requiresAllParticipants: true,
       blocksScheduling: false,
       sortOrder: 50,
     },
@@ -1013,7 +1056,7 @@ async function main() {
         "INTAKE_FORM",
         "AVAILABILITY_SUBMISSION",
       ]);
-      const isCompleted = Boolean(step.formType && completeByFormType.has(step.formType));
+      const isCompleted = Boolean(completeByFormType.has(resolveStepCompletionToken(step)));
       return {
         caseId: singleCase.id,
         stepId: step.id,
@@ -1022,6 +1065,7 @@ async function main() {
           ? {
               source: "seed",
               formType: step.formType,
+              stepCode: step.stepCode || null,
             }
           : null,
         completedAt: isCompleted ? addDays(new Date(), -2) : null,
@@ -1185,7 +1229,7 @@ async function main() {
         "AGREEMENT_FORM",
         "AVAILABILITY_SUBMISSION",
       ]);
-      const isCompleted = Boolean(step.formType && completeByFormType.has(step.formType));
+      const isCompleted = Boolean(completeByFormType.has(resolveStepCompletionToken(step)));
 
       return {
         caseId: coupleCase.id,
@@ -1195,6 +1239,7 @@ async function main() {
           ? {
               source: "seed",
               formType: step.formType,
+              stepCode: step.stepCode || null,
             }
           : null,
         completedAt: isCompleted ? addDays(new Date(), -1) : null,

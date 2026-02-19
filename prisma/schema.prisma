@@ -47,6 +47,16 @@ enum WorkflowStepType {
   SYSTEM
 }
 
+enum WorkflowStepCode {
+  INTAKE_FORM
+  AVAILABILITY_CAPTURED
+  TERMS_AND_CONDITIONS
+  CONSENT_FORM
+  AGREEMENT_FORM
+  OUTTAKE_FORM
+  CUSTOM
+}
+
 enum CaseWorkflowStepStatus {
   PENDING
   COMPLETED
@@ -234,8 +244,10 @@ model CaseWorkflowStep {
   templateId       String
   name             String
   formType         String?
+  stepCode         WorkflowStepCode?
   type             WorkflowStepType
   required         Boolean                @default(true)
+  requiresAllParticipants Boolean         @default(false)
   blocksScheduling Boolean                @default(false)
   sortOrder        Int                    @default(0)
   template         CaseWorkflowTemplate   @relation(fields: [templateId], references: [id], onDelete: Cascade)
@@ -245,6 +257,7 @@ model CaseWorkflowStep {
 
   @@index([templateId, sortOrder])
   @@index([templateId, formType])
+  @@index([templateId, stepCode])
 }
 
 model CaseWorkflowState {
