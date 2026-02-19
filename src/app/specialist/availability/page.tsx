@@ -39,7 +39,7 @@ export default async function SpecialistAvailabilityPage() {
   return (
     <AuthenticatedShell
       title="My Availability"
-      subtitle="Set your available 60-minute blocks for manual assignment mode."
+      subtitle={`Set your available ${availability.slotPolicy.slotMinutes}-minute blocks between ${String(availability.slotPolicy.startHour).padStart(2, "0")}:00 and ${String(availability.slotPolicy.endHour).padStart(2, "0")}:00 for manual assignment mode.`}
       userName={user.name}
       role={user.role}
       navItems={[

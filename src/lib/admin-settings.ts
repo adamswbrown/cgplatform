@@ -12,6 +12,8 @@ export type OperationalSettings = {
   defaultIntakeSource: IntakeSourceType;
   defaultIndividualSessionMinutes: number;
   defaultCoupleSessionMinutes: number;
+  defaultSpecialistStandardStartHour: number;
+  defaultSpecialistStandardEndHour: number;
   requireTermsBeforeInSession: boolean;
   requireOuttakeBeforeClose: boolean;
   manualProviderHorizonDays: number;
@@ -25,6 +27,8 @@ export type OperationalSettings = {
   defaultIntakeInviteExpiresHours: number;
   defaultIntakeInviteMaxAttempts: number;
   formAccessSessionHours: number;
+  specialistAvailabilityDefaultGridDays: number;
+  specialistAvailabilityMaxGridDays: number;
 };
 
 const DEFAULT_OPERATIONAL_SETTINGS: OperationalSettings = {
@@ -33,6 +37,8 @@ const DEFAULT_OPERATIONAL_SETTINGS: OperationalSettings = {
   defaultIntakeSource: "SECURE_LINK",
   defaultIndividualSessionMinutes: 40,
   defaultCoupleSessionMinutes: 60,
+  defaultSpecialistStandardStartHour: 9,
+  defaultSpecialistStandardEndHour: 18,
   requireTermsBeforeInSession: true,
   requireOuttakeBeforeClose: true,
   manualProviderHorizonDays: 14,
@@ -46,6 +52,8 @@ const DEFAULT_OPERATIONAL_SETTINGS: OperationalSettings = {
   defaultIntakeInviteExpiresHours: 72,
   defaultIntakeInviteMaxAttempts: 5,
   formAccessSessionHours: 8,
+  specialistAvailabilityDefaultGridDays: 14,
+  specialistAvailabilityMaxGridDays: 62,
 };
 
 function clampInteger(
@@ -168,6 +176,40 @@ function defaultIntakeSourceFromEnvironment() {
 function normalizeOperationalSettings(candidate: unknown): OperationalSettings {
   const parsed = (candidate as Partial<OperationalSettings>) || {};
 
+  let defaultSpecialistStandardStartHour = clampInteger(
+    parsed.defaultSpecialistStandardStartHour,
+    DEFAULT_OPERATIONAL_SETTINGS.defaultSpecialistStandardStartHour,
+    0,
+    22,
+  );
+  let defaultSpecialistStandardEndHour = clampInteger(
+    parsed.defaultSpecialistStandardEndHour,
+    DEFAULT_OPERATIONAL_SETTINGS.defaultSpecialistStandardEndHour,
+    1,
+    23,
+  );
+  if (defaultSpecialistStandardEndHour <= defaultSpecialistStandardStartHour) {
+    defaultSpecialistStandardStartHour =
+      DEFAULT_OPERATIONAL_SETTINGS.defaultSpecialistStandardStartHour;
+    defaultSpecialistStandardEndHour = DEFAULT_OPERATIONAL_SETTINGS.defaultSpecialistStandardEndHour;
+  }
+
+  const specialistAvailabilityDefaultGridDays = clampInteger(
+    parsed.specialistAvailabilityDefaultGridDays,
+    DEFAULT_OPERATIONAL_SETTINGS.specialistAvailabilityDefaultGridDays,
+    1,
+    120,
+  );
+  let specialistAvailabilityMaxGridDays = clampInteger(
+    parsed.specialistAvailabilityMaxGridDays,
+    DEFAULT_OPERATIONAL_SETTINGS.specialistAvailabilityMaxGridDays,
+    1,
+    180,
+  );
+  if (specialistAvailabilityMaxGridDays < specialistAvailabilityDefaultGridDays) {
+    specialistAvailabilityMaxGridDays = specialistAvailabilityDefaultGridDays;
+  }
+
   let manualProviderMorningStartHour = clampInteger(
     parsed.manualProviderMorningStartHour,
     DEFAULT_OPERATIONAL_SETTINGS.manualProviderMorningStartHour,
@@ -235,6 +277,8 @@ function normalizeOperationalSettings(candidate: unknown): OperationalSettings {
       30,
       180,
     ),
+    defaultSpecialistStandardStartHour,
+    defaultSpecialistStandardEndHour,
     requireTermsBeforeInSession: normalizeBoolean(
       parsed.requireTermsBeforeInSession,
       DEFAULT_OPERATIONAL_SETTINGS.requireTermsBeforeInSession,
@@ -289,6 +333,8 @@ function normalizeOperationalSettings(candidate: unknown): OperationalSettings {
       1,
       24,
     ),
+    specialistAvailabilityDefaultGridDays,
+    specialistAvailabilityMaxGridDays,
   };
 }
 

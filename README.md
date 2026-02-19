@@ -26,12 +26,14 @@ Exposed runtime settings:
 - Scheduling assignment mode (`manual` or `auto`)
 - Default individual session length
 - Default couples session length
+- Default counsellor standard working hours (used for new counsellor profiles)
 - Workflow gate toggles
   - require Terms before `IN_SESSION`
   - require Outtake before `CLOSED`
 - Manual-engine simulation policy
   - slot horizon (days)
   - slot increment (minutes)
+  - availability calendar default/max range (days)
   - morning/afternoon window start/end hours
 - Form PIN default expiry and max attempts
 - Intake invite default expiry and max attempts
@@ -270,7 +272,7 @@ After `npm run db:seed`, deterministic PIN links are created for quick manual te
 - `/admin/cases/[id]` (lifecycle controls, manual override, and provider availability snapshot across all active counsellors)
 - `/admin/clients`
 - `/admin/specialists`
-- `/admin/specialists/[id]`
+- `/admin/specialists/[id]` (profile, capabilities, scheduler mapping, and standard working hours)
 - `/admin/workflows` (design templates/steps)
 - `/admin/settings` (administrative settings hub)
 - `/admin/settings/operations` (scheduling engine + mode, workflow gates, manual-engine simulation constants, and PIN policy defaults)
@@ -322,7 +324,7 @@ Specialist:
 5. External form completions are ingested via `/forms/submission`.
 6. Clients submit location + notes + preferred times (`morning`, `afternoon`, `evening`) in intake.
 7. Workflow remains blocked until required blocking steps are complete.
-8. In manual mode, ops uses `/admin/assignments` to drag cases from `Unassigned` into specialist time blocks (`Morning`, `Afternoon`, `Evening`), and the system books the earliest matching 60-minute slot between `09:00` and `18:00`.
+8. In manual mode, ops uses `/admin/assignments` to drag cases from `Unassigned` into specialist time blocks (`Morning`, `Afternoon`, `Evening`), and the system books the earliest matching 60-minute slot within the selected counsellor's configured working hours.
 9. In auto mode, overlap-based allocation books the earliest eligible slot.
 10. Terms of Counselling is sent after booking; case cannot transition to `IN_SESSION` until terms is completed.
 
@@ -345,7 +347,7 @@ Specialist:
 4. In manual mode (default), assign specialist manually; in auto mode, run auto allocation or manual override.
 5. Transition case statuses through lifecycle stages when gate conditions are met.
 6. Issue and disable PIN-gated form access links for participants.
-7. Manage specialist profiles, capabilities, and provider mapping fields.
+7. Manage counsellor profiles, capabilities, standard working hours, and provider mapping fields.
 
 ### Counsellor
 

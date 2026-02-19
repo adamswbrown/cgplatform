@@ -182,6 +182,42 @@ export default async function OperationalSettingsPage({
                 required
               />
             </div>
+            <div>
+              <label
+                htmlFor="defaultSpecialistStandardStartHour"
+                className="mb-1 block text-sm font-medium"
+              >
+                Default counsellor start hour (24h)
+              </label>
+              <input
+                id="defaultSpecialistStandardStartHour"
+                name="defaultSpecialistStandardStartHour"
+                type="number"
+                min={0}
+                max={22}
+                defaultValue={settings.defaultSpecialistStandardStartHour}
+                className="w-full px-3 py-2"
+                required
+              />
+            </div>
+            <div>
+              <label
+                htmlFor="defaultSpecialistStandardEndHour"
+                className="mb-1 block text-sm font-medium"
+              >
+                Default counsellor end hour (24h)
+              </label>
+              <input
+                id="defaultSpecialistStandardEndHour"
+                name="defaultSpecialistStandardEndHour"
+                type="number"
+                min={1}
+                max={23}
+                defaultValue={settings.defaultSpecialistStandardEndHour}
+                className="w-full px-3 py-2"
+                required
+              />
+            </div>
           </div>
 
           <h3 className="pt-2 text-base font-semibold text-[color:var(--cg-ink)]">
@@ -224,6 +260,42 @@ export default async function OperationalSettingsPage({
                 min={5}
                 max={60}
                 defaultValue={settings.manualProviderSlotIncrementMinutes}
+                className="w-full px-3 py-2"
+                required
+              />
+            </div>
+            <div>
+              <label
+                htmlFor="specialistAvailabilityDefaultGridDays"
+                className="mb-1 block text-sm font-medium"
+              >
+                Availability calendar default range (days)
+              </label>
+              <input
+                id="specialistAvailabilityDefaultGridDays"
+                name="specialistAvailabilityDefaultGridDays"
+                type="number"
+                min={1}
+                max={120}
+                defaultValue={settings.specialistAvailabilityDefaultGridDays}
+                className="w-full px-3 py-2"
+                required
+              />
+            </div>
+            <div>
+              <label
+                htmlFor="specialistAvailabilityMaxGridDays"
+                className="mb-1 block text-sm font-medium"
+              >
+                Availability calendar max range (days)
+              </label>
+              <input
+                id="specialistAvailabilityMaxGridDays"
+                name="specialistAvailabilityMaxGridDays"
+                type="number"
+                min={1}
+                max={180}
+                defaultValue={settings.specialistAvailabilityMaxGridDays}
                 className="w-full px-3 py-2"
                 required
               />

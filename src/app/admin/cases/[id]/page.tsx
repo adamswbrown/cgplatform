@@ -178,6 +178,31 @@ function formatLabelToken(token: string) {
     .replace(/\bUk\b/g, "UK");
 }
 
+function defaultManualBlockWindows(startHour: number, endHour: number) {
+  const morningEnd = Math.min(12, endHour);
+  const afternoonStart = Math.max(12, startHour);
+  const afternoonEnd = Math.min(17, endHour);
+  const eveningStart = Math.max(17, startHour);
+  return {
+    MORNING: {
+      startHour,
+      endHour: Math.max(startHour, morningEnd),
+    },
+    AFTERNOON: {
+      startHour: afternoonStart,
+      endHour: Math.max(afternoonStart, afternoonEnd),
+    },
+    EVENING: {
+      startHour: eveningStart,
+      endHour: Math.max(eveningStart, endHour),
+    },
+  };
+}
+
+function formatBlockWindow(window: { startHour: number; endHour: number }) {
+  return `${String(window.startHour).padStart(2, "0")}:00-${String(window.endHour).padStart(2, "0")}:00`;
+}
+
 function formatIntakeFieldLabel(path: string) {
   const normalizedPath = normalizeIntakePath(path);
   const mapped = INTAKE_FIELD_LABELS[normalizedPath];
@@ -324,7 +349,7 @@ export default async function CaseDetailPage({ params, searchParams }: CaseDetai
     getCaseDetails(id),
     assignmentPanelActive ? listSpecialistsForOps() : Promise.resolve([]),
     assignmentPanelActive ? listWorkflowTemplatesForOps() : Promise.resolve([]),
-    formsPanelActive ? getOperationalSettings() : Promise.resolve(null),
+    formsPanelActive || assignmentPanelActive ? getOperationalSettings() : Promise.resolve(null),
   ]);
 
   if (!caseItem) {
@@ -362,6 +387,10 @@ export default async function CaseDetailPage({ params, searchParams }: CaseDetai
     : [];
   const formPinExpiresDefault = operationalSettings?.defaultFormPinExpiresHours ?? 72;
   const formPinMaxAttemptsDefault = operationalSettings?.defaultFormPinMaxAttempts ?? 5;
+  const defaultBlockWindows = defaultManualBlockWindows(
+    operationalSettings?.defaultSpecialistStandardStartHour ?? 9,
+    operationalSettings?.defaultSpecialistStandardEndHour ?? 18,
+  );
   const intakeFieldRows = activePanel === "intake" ? flattenIntakeFields(caseItem.intakeFormData) : [];
   const intakePayloadJson =
     activePanel === "intake" && caseItem.intakeFormData
@@ -724,9 +753,15 @@ export default async function CaseDetailPage({ params, searchParams }: CaseDetai
                 className="w-full rounded-md border border-[color:var(--border)] px-2 py-2 text-sm"
               >
                 <option value="">Use client-selected availability</option>
-                <option value="MORNING">Morning (09:00-12:00)</option>
-                <option value="AFTERNOON">Afternoon (12:00-17:00)</option>
-                <option value="EVENING">Evening (17:00-18:00)</option>
+                <option value="MORNING">
+                  Morning ({formatBlockWindow(defaultBlockWindows.MORNING)})
+                </option>
+                <option value="AFTERNOON">
+                  Afternoon ({formatBlockWindow(defaultBlockWindows.AFTERNOON)})
+                </option>
+                <option value="EVENING">
+                  Evening ({formatBlockWindow(defaultBlockWindows.EVENING)})
+                </option>
               </select>
 
               <button

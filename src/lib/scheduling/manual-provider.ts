@@ -37,6 +37,11 @@ type ManualProviderPolicy = {
   }>;
 };
 
+type SpecialistWorkingHours = {
+  startHour: number;
+  endHour: number;
+};
+
 function addMinutes(value: Date, minutes: number) {
   return new Date(value.getTime() + minutes * 60_000);
 }
@@ -114,6 +119,43 @@ export class ManualSchedulingProvider implements SchedulingProvider {
     return this.policyPromise;
   }
 
+  private async getSpecialistWorkingHours(specialistId: string) {
+    const specialist = await this.persistence.specialist.findUnique({
+      where: {
+        id: specialistId,
+      },
+      select: {
+        standardStartHour: true,
+        standardEndHour: true,
+      },
+    });
+    if (!specialist) {
+      return {
+        startHour: 9,
+        endHour: 18,
+      } satisfies SpecialistWorkingHours;
+    }
+
+    const startHour = Number.isFinite(specialist.standardStartHour)
+      ? Math.max(0, Math.min(22, Math.round(specialist.standardStartHour)))
+      : 9;
+    const endHour = Number.isFinite(specialist.standardEndHour)
+      ? Math.max(1, Math.min(23, Math.round(specialist.standardEndHour)))
+      : 18;
+
+    if (endHour <= startHour) {
+      return {
+        startHour: 9,
+        endHour: 18,
+      } satisfies SpecialistWorkingHours;
+    }
+
+    return {
+      startHour,
+      endHour,
+    } satisfies SpecialistWorkingHours;
+  }
+
   private async getExistingBookings(specialistId: string) {
     const sessions = await this.persistence.session.findMany({
       where: {
@@ -158,6 +200,7 @@ export class ManualSchedulingProvider implements SchedulingProvider {
     reference: Date,
     durationMinutes: number,
     policy: ManualProviderPolicy,
+    workingHours: SpecialistWorkingHours,
   ) {
     const slots: Date[] = [];
     const durationMs = durationMinutes * 60_000;
@@ -175,8 +218,14 @@ export class ManualSchedulingProvider implements SchedulingProvider {
       }
 
       for (const window of policy.workWindows) {
-        const windowStart = makeUtcDate(day, window.startHour, 0).getTime();
-        const windowEnd = makeUtcDate(day, window.endHour, 0).getTime();
+        const startHour = Math.max(window.startHour, workingHours.startHour);
+        const endHour = Math.min(window.endHour, workingHours.endHour);
+        if (endHour <= startHour) {
+          continue;
+        }
+
+        const windowStart = makeUtcDate(day, startHour, 0).getTime();
+        const windowEnd = makeUtcDate(day, endHour, 0).getTime();
 
         for (
           let candidateStart = windowStart;
@@ -236,6 +285,7 @@ export class ManualSchedulingProvider implements SchedulingProvider {
     const normalizedDuration = normalizeDuration(durationMinutes);
     const now = new Date();
     const policy = await this.getPolicy();
+    const workingHours = await this.getSpecialistWorkingHours(specialistId);
     const availabilityWindows = await this.getAvailabilityWindows(specialistId, now);
     const availableWindows = availabilityWindows.filter(
       (window) => window.availabilityType === "AVAILABLE",
@@ -251,7 +301,7 @@ export class ManualSchedulingProvider implements SchedulingProvider {
             policy,
             availableWindows,
           )
-        : this.generateCandidateSlots(now, normalizedDuration, policy);
+        : this.generateCandidateSlots(now, normalizedDuration, policy, workingHours);
     const candidatesAfterOutOfOffice = candidates.filter((candidate) => {
       const candidateEnd = addMinutes(candidate, normalizedDuration);
       return !outOfOfficeWindows.some((window) =>

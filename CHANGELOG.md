@@ -8,12 +8,19 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 ## [Unreleased]
 
 ### Added
+- Added per-counsellor standard working hours (`standardStartHour`, `standardEndHour`) to specialist profiles.
+- Added operational settings for default counsellor working hours and availability calendar default/max range.
 
 ### Changed
+- Changed manual assignment and availability flows to respect counsellor-specific working hours.
+- Changed assignment board time-block labels to render configured window ranges instead of hardcoded times.
+- Changed seeded counsellor fixtures to include explicit standard working hours for local demos.
 
 ### Fixed
+- Fixed remaining hardcoded hour assumptions across assignment/availability UI copy and validation checks.
 
 ### Docs
+- Updated README configuration and workflow notes for counsellor standard working hours.
 
 ## [0.2.0] - 2026-02-19
 

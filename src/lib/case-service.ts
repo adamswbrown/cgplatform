@@ -319,24 +319,97 @@ function normalizePhoneForMatch(value: string | null | undefined) {
 type IntakeTimePreference = "MORNING" | "AFTERNOON" | "EVENING";
 export type ManualAssignmentTimeBlock = IntakeTimePreference;
 export type SpecialistAvailabilityType = "AVAILABLE" | "OUT_OF_OFFICE";
-
-const INTAKE_TIME_PREFERENCES: IntakeTimePreference[] = ["MORNING", "AFTERNOON", "EVENING"];
-const MANUAL_ASSIGNMENT_DAY_START_HOUR = 9;
-const MANUAL_ASSIGNMENT_DAY_END_HOUR = 18;
-const MANUAL_ASSIGNMENT_SLOT_MINUTES = 60;
-const DEFAULT_SPECIALIST_AVAILABILITY_GRID_DAYS = 14;
-const MAX_SPECIALIST_AVAILABILITY_GRID_DAYS = 62;
-const MANUAL_ASSIGNMENT_BLOCK_WINDOWS: Record<ManualAssignmentTimeBlock, {
+type SpecialistWorkingHours = {
   startHour: number;
   endHour: number;
-}> = {
-  MORNING: { startHour: 9, endHour: 12 },
-  AFTERNOON: { startHour: 12, endHour: 17 },
-  EVENING: { startHour: 17, endHour: 18 },
 };
+type ManualAssignmentBlockWindows = Record<
+  ManualAssignmentTimeBlock,
+  {
+    startHour: number;
+    endHour: number;
+  }
+>;
 
-function getManualAssignmentBlockWindow(block: ManualAssignmentTimeBlock) {
-  return MANUAL_ASSIGNMENT_BLOCK_WINDOWS[block];
+const INTAKE_TIME_PREFERENCES: IntakeTimePreference[] = ["MORNING", "AFTERNOON", "EVENING"];
+const DEFAULT_SPECIALIST_STANDARD_START_HOUR = 9;
+const DEFAULT_SPECIALIST_STANDARD_END_HOUR = 18;
+const MANUAL_ASSIGNMENT_SLOT_MINUTES = 60;
+const FALLBACK_SPECIALIST_AVAILABILITY_GRID_DAYS = 14;
+const FALLBACK_SPECIALIST_AVAILABILITY_MAX_GRID_DAYS = 62;
+const DEFAULT_MANUAL_ASSIGNMENT_BLOCK_WINDOWS = resolveManualAssignmentBlockWindows({
+  startHour: DEFAULT_SPECIALIST_STANDARD_START_HOUR,
+  endHour: DEFAULT_SPECIALIST_STANDARD_END_HOUR,
+});
+
+function clampWorkingHour(value: number, min: number, max: number) {
+  if (!Number.isFinite(value)) {
+    return min;
+  }
+  if (value < min) {
+    return min;
+  }
+  if (value > max) {
+    return max;
+  }
+  return Math.round(value);
+}
+
+function normalizeSpecialistWorkingHours(
+  startHour?: number | null,
+  endHour?: number | null,
+): SpecialistWorkingHours {
+  const normalizedStart = clampWorkingHour(
+    Number(startHour),
+    0,
+    22,
+  );
+  const normalizedEnd = clampWorkingHour(
+    Number(endHour),
+    1,
+    23,
+  );
+  if (normalizedEnd <= normalizedStart) {
+    return {
+      startHour: DEFAULT_SPECIALIST_STANDARD_START_HOUR,
+      endHour: DEFAULT_SPECIALIST_STANDARD_END_HOUR,
+    };
+  }
+  return {
+    startHour: normalizedStart,
+    endHour: normalizedEnd,
+  };
+}
+
+function resolveManualAssignmentBlockWindows(
+  workingHours: SpecialistWorkingHours,
+): ManualAssignmentBlockWindows {
+  const morningEnd = Math.min(12, workingHours.endHour);
+  const afternoonStart = Math.max(12, workingHours.startHour);
+  const afternoonEnd = Math.min(17, workingHours.endHour);
+  const eveningStart = Math.max(17, workingHours.startHour);
+
+  return {
+    MORNING: {
+      startHour: workingHours.startHour,
+      endHour: Math.max(workingHours.startHour, morningEnd),
+    },
+    AFTERNOON: {
+      startHour: afternoonStart,
+      endHour: Math.max(afternoonStart, afternoonEnd),
+    },
+    EVENING: {
+      startHour: eveningStart,
+      endHour: Math.max(eveningStart, workingHours.endHour),
+    },
+  };
+}
+
+function getManualAssignmentBlockWindow(
+  block: ManualAssignmentTimeBlock,
+  windows: ManualAssignmentBlockWindows = DEFAULT_MANUAL_ASSIGNMENT_BLOCK_WINDOWS,
+) {
+  return windows[block];
 }
 
 function normalizeIntakeTimePreference(value: string): IntakeTimePreference | null {
@@ -409,53 +482,92 @@ function extractIntakeTimePreferencesFromCase(caseRecord: {
   );
 }
 
-function slotIsOnManualAssignmentGrid(slot: Date) {
+function slotIsOnManualAssignmentGrid(
+  slot: Date,
+  workingHours: SpecialistWorkingHours = {
+    startHour: DEFAULT_SPECIALIST_STANDARD_START_HOUR,
+    endHour: DEFAULT_SPECIALIST_STANDARD_END_HOUR,
+  },
+) {
   const hour = slot.getHours();
   const minute = slot.getMinutes();
   return (
-    hour >= MANUAL_ASSIGNMENT_DAY_START_HOUR &&
-    hour < MANUAL_ASSIGNMENT_DAY_END_HOUR &&
+    hour >= workingHours.startHour &&
+    hour < workingHours.endHour &&
     minute === 0
   );
 }
 
-function slotMatchesManualTimeBlock(slot: Date, block: ManualAssignmentTimeBlock) {
-  if (!slotIsOnManualAssignmentGrid(slot)) {
+function slotMatchesManualTimeBlock(
+  slot: Date,
+  block: ManualAssignmentTimeBlock,
+  options?: {
+    workingHours?: SpecialistWorkingHours;
+    blockWindows?: ManualAssignmentBlockWindows;
+  },
+) {
+  const workingHours =
+    options?.workingHours ||
+    normalizeSpecialistWorkingHours(
+      DEFAULT_SPECIALIST_STANDARD_START_HOUR,
+      DEFAULT_SPECIALIST_STANDARD_END_HOUR,
+    );
+  if (!slotIsOnManualAssignmentGrid(slot, workingHours)) {
     return false;
   }
 
   const hour = slot.getHours();
-  const window = MANUAL_ASSIGNMENT_BLOCK_WINDOWS[block];
+  const window = getManualAssignmentBlockWindow(
+    block,
+    options?.blockWindows || resolveManualAssignmentBlockWindows(workingHours),
+  );
+  if (window.endHour <= window.startHour) {
+    return false;
+  }
   return hour >= window.startHour && hour < window.endHour;
 }
 
 function slotMatchesAnyManualTimeBlock(
   slot: Date,
   blocks: ManualAssignmentTimeBlock[],
+  options?: {
+    workingHours?: SpecialistWorkingHours;
+    blockWindows?: ManualAssignmentBlockWindows;
+  },
 ) {
+  const workingHours =
+    options?.workingHours ||
+    normalizeSpecialistWorkingHours(
+      DEFAULT_SPECIALIST_STANDARD_START_HOUR,
+      DEFAULT_SPECIALIST_STANDARD_END_HOUR,
+    );
   if (blocks.length === 0) {
-    return slotIsOnManualAssignmentGrid(slot);
+    return slotIsOnManualAssignmentGrid(slot, workingHours);
   }
 
-  return blocks.some((block) => slotMatchesManualTimeBlock(slot, block));
+  return blocks.some((block) => slotMatchesManualTimeBlock(slot, block, options));
 }
 
 function resolveManualAssignmentTimeBlockForSlot(
   slot: Date | null | undefined,
+  options?: {
+    workingHours?: SpecialistWorkingHours;
+    blockWindows?: ManualAssignmentBlockWindows;
+  },
 ): ManualAssignmentTimeBlock | null {
   if (!slot) {
     return null;
   }
 
-  if (slotMatchesManualTimeBlock(slot, "MORNING")) {
+  if (slotMatchesManualTimeBlock(slot, "MORNING", options)) {
     return "MORNING";
   }
 
-  if (slotMatchesManualTimeBlock(slot, "AFTERNOON")) {
+  if (slotMatchesManualTimeBlock(slot, "AFTERNOON", options)) {
     return "AFTERNOON";
   }
 
-  if (slotMatchesManualTimeBlock(slot, "EVENING")) {
+  if (slotMatchesManualTimeBlock(slot, "EVENING", options)) {
     return "EVENING";
   }
 
@@ -512,17 +624,21 @@ function addDays(value: Date, days: number) {
   return next;
 }
 
-function normalizeGridDayCount(dayCount?: number) {
+function normalizeGridDayCount(
+  dayCount: number | undefined,
+  defaultGridDays: number,
+  maxGridDays: number,
+) {
   if (!Number.isFinite(dayCount)) {
-    return DEFAULT_SPECIALIST_AVAILABILITY_GRID_DAYS;
+    return defaultGridDays;
   }
 
   const rounded = Math.floor(Number(dayCount));
   if (rounded < 1) {
-    return 1;
+    return defaultGridDays;
   }
 
-  return Math.min(rounded, MAX_SPECIALIST_AVAILABILITY_GRID_DAYS);
+  return Math.min(rounded, maxGridDays);
 }
 
 function normalizeGridStartDate(startDate?: Date | string) {
@@ -1590,6 +1706,8 @@ export async function overrideCaseAssignment(input: {
         id: true,
         name: true,
         supportsCouples: true,
+        standardStartHour: true,
+        standardEndHour: true,
       },
     });
 
@@ -1598,6 +1716,11 @@ export async function overrideCaseAssignment(input: {
     }
 
     const participantCount = caseRecord.participants.length;
+    const specialistWorkingHours = normalizeSpecialistWorkingHours(
+      specialist.standardStartHour,
+      specialist.standardEndHour,
+    );
+    const specialistBlockWindows = resolveManualAssignmentBlockWindows(specialistWorkingHours);
     const eventType = resolveSchedulingEventType(specialist, participantCount);
     const requestedDurationMinutes = await resolveSessionDurationMinutes(
       caseRecord.flags,
@@ -1610,11 +1733,14 @@ export async function overrideCaseAssignment(input: {
     const intakeTimePreferences = extractIntakeTimePreferencesFromCase(caseRecord);
     const preferredStartTime = parsePreferredStartTime(input.preferredStartTime);
     const preferredStartTimeBlock = preferredStartTime
-      ? resolveManualAssignmentTimeBlockForSlot(preferredStartTime)
+      ? resolveManualAssignmentTimeBlockForSlot(preferredStartTime, {
+          workingHours: specialistWorkingHours,
+          blockWindows: specialistBlockWindows,
+        })
       : null;
     if (preferredStartTime && !preferredStartTimeBlock) {
       throw new DomainError(
-        `Preferred start time must be between ${String(MANUAL_ASSIGNMENT_DAY_START_HOUR).padStart(2, "0")}:00 and ${String(MANUAL_ASSIGNMENT_DAY_END_HOUR).padStart(2, "0")}:00.`,
+        `Preferred start time must be between ${String(specialistWorkingHours.startHour).padStart(2, "0")}:00 and ${String(specialistWorkingHours.endHour).padStart(2, "0")}:00 for ${specialist.name}.`,
         409,
       );
     }
@@ -1802,12 +1928,15 @@ export async function overrideCaseAssignment(input: {
     }
 
     const preferredSlots = availableSlots.filter((slot) =>
-      slotMatchesAnyManualTimeBlock(slot, manualTargetBlocks),
+      slotMatchesAnyManualTimeBlock(slot, manualTargetBlocks, {
+        workingHours: specialistWorkingHours,
+        blockWindows: specialistBlockWindows,
+      }),
     );
     const earliestPreferredSlot = exactPreferredSlot || preferredSlots[0];
     if (!earliestPreferredSlot) {
       throw new DomainError(
-        `No 60-minute slots between 09:00 and 18:00 match the selected manual availability block(s) for counsellor ${specialist.name}.`,
+        `No 60-minute slots between ${String(specialistWorkingHours.startHour).padStart(2, "0")}:00 and ${String(specialistWorkingHours.endHour).padStart(2, "0")}:00 match the selected manual availability block(s) for counsellor ${specialist.name}.`,
         409,
       );
     }
@@ -1913,8 +2042,9 @@ export async function overrideCaseAssignment(input: {
         manualTargetBlocks,
         manualAssignmentPolicy: {
           slotMinutes: MANUAL_ASSIGNMENT_SLOT_MINUTES,
-          dayStartHour: MANUAL_ASSIGNMENT_DAY_START_HOUR,
-          dayEndHour: MANUAL_ASSIGNMENT_DAY_END_HOUR,
+          dayStartHour: specialistWorkingHours.startHour,
+          dayEndHour: specialistWorkingHours.endHour,
+          blockWindows: specialistBlockWindows,
         },
         overlapWindowCount,
       },
@@ -2628,6 +2758,8 @@ export async function listSpecialistsForOps() {
       email: true,
       calUserId: true,
       supportsCouples: true,
+      standardStartHour: true,
+      standardEndHour: true,
       calIndividualEventTypeId: true,
       calCouplesEventTypeId: true,
       capabilities: true,
@@ -2795,6 +2927,8 @@ export async function getManualAssignmentDashboard() {
         id: true,
         name: true,
         supportsCouples: true,
+        standardStartHour: true,
+        standardEndHour: true,
       },
       orderBy: {
         name: "asc",
@@ -2810,6 +2944,8 @@ export async function getManualAssignmentDashboard() {
       next: Partial<Record<ManualAssignmentTimeBlock, Date>>;
       slotPreview: Record<ManualAssignmentTimeBlock, Date[]>;
       calendarSlots: Date[];
+      workingHours: SpecialistWorkingHours;
+      blockWindows: ManualAssignmentBlockWindows;
     }
   >();
 
@@ -2818,16 +2954,36 @@ export async function getManualAssignmentDashboard() {
       const schedulingProvider = await createSchedulingProvider(db);
       const results = await Promise.all(
         specialists.map(async (specialist) => {
+          const workingHours = normalizeSpecialistWorkingHours(
+            specialist.standardStartHour,
+            specialist.standardEndHour,
+          );
+          const blockWindows = resolveManualAssignmentBlockWindows(workingHours);
           const slots = await schedulingProvider.getAvailableSlots(
             specialist.id,
             "individual",
             MANUAL_ASSIGNMENT_SLOT_MINUTES,
           );
-          const manualSlots = slots.filter((slot) => slotIsOnManualAssignmentGrid(slot));
+          const manualSlots = slots.filter((slot) => slotIsOnManualAssignmentGrid(slot, workingHours));
           const slotsByBlock: Record<ManualAssignmentTimeBlock, Date[]> = {
-            MORNING: manualSlots.filter((slot) => slotMatchesManualTimeBlock(slot, "MORNING")),
-            AFTERNOON: manualSlots.filter((slot) => slotMatchesManualTimeBlock(slot, "AFTERNOON")),
-            EVENING: manualSlots.filter((slot) => slotMatchesManualTimeBlock(slot, "EVENING")),
+            MORNING: manualSlots.filter((slot) =>
+              slotMatchesManualTimeBlock(slot, "MORNING", {
+                workingHours,
+                blockWindows,
+              }),
+            ),
+            AFTERNOON: manualSlots.filter((slot) =>
+              slotMatchesManualTimeBlock(slot, "AFTERNOON", {
+                workingHours,
+                blockWindows,
+              }),
+            ),
+            EVENING: manualSlots.filter((slot) =>
+              slotMatchesManualTimeBlock(slot, "EVENING", {
+                workingHours,
+                blockWindows,
+              }),
+            ),
           };
           const counts: Record<ManualAssignmentTimeBlock, number> = {
             MORNING: slotsByBlock.MORNING.length,
@@ -2854,6 +3010,8 @@ export async function getManualAssignmentDashboard() {
             next,
             slotPreview,
             calendarSlots,
+            workingHours,
+            blockWindows,
           };
         }),
       );
@@ -2864,6 +3022,8 @@ export async function getManualAssignmentDashboard() {
           next: result.next,
           slotPreview: result.slotPreview,
           calendarSlots: result.calendarSlots,
+          workingHours: result.workingHours,
+          blockWindows: result.blockWindows,
         });
       }
     } catch (error) {
@@ -2875,6 +3035,38 @@ export async function getManualAssignmentDashboard() {
   }
 
   const specialistIdSet = new Set(specialists.map((specialist) => specialist.id));
+  const specialistHoursById = new Map(
+    specialists.map((specialist) => [
+      specialist.id,
+      normalizeSpecialistWorkingHours(
+        specialist.standardStartHour,
+        specialist.standardEndHour,
+      ),
+    ]),
+  );
+  const slotPolicyStartHour =
+    specialists.length > 0
+      ? Math.min(
+          ...specialists.map((specialist) =>
+            normalizeSpecialistWorkingHours(
+              specialist.standardStartHour,
+              specialist.standardEndHour,
+            ).startHour,
+          ),
+        )
+      : operationalSettings.defaultSpecialistStandardStartHour;
+  const slotPolicyEndHour =
+    specialists.length > 0
+      ? Math.max(
+          ...specialists.map((specialist) =>
+            normalizeSpecialistWorkingHours(
+              specialist.standardStartHour,
+              specialist.standardEndHour,
+            ).endHour,
+          ),
+        )
+      : operationalSettings.defaultSpecialistStandardEndHour;
+
   const assignedCasesForBoard = assignedCases
     .filter(
       (
@@ -2889,7 +3081,15 @@ export async function getManualAssignmentDashboard() {
     .map((caseItem) => {
       const boardCase = mapCaseToManualAssignmentBoardCase(caseItem);
       const sessionStart = caseItem.sessions[0]?.providerStartTime || null;
-      const blockFromSession = resolveManualAssignmentTimeBlockForSlot(sessionStart);
+      const workingHours = specialistHoursById.get(caseItem.assignedSpecialistId) ||
+        normalizeSpecialistWorkingHours(
+          operationalSettings.defaultSpecialistStandardStartHour,
+          operationalSettings.defaultSpecialistStandardEndHour,
+        );
+      const blockFromSession = resolveManualAssignmentTimeBlockForSlot(sessionStart, {
+        workingHours,
+        blockWindows: resolveManualAssignmentBlockWindows(workingHours),
+      });
 
       return {
         ...boardCase,
@@ -2903,8 +3103,8 @@ export async function getManualAssignmentDashboard() {
     assignmentMode,
     schedulingEngineType: operationalSettings.schedulingEngineType,
     slotPolicy: {
-      startHour: MANUAL_ASSIGNMENT_DAY_START_HOUR,
-      endHour: MANUAL_ASSIGNMENT_DAY_END_HOUR,
+      startHour: slotPolicyStartHour,
+      endHour: slotPolicyEndHour,
       slotMinutes: MANUAL_ASSIGNMENT_SLOT_MINUTES,
     },
     providerError,
@@ -2919,6 +3119,20 @@ export async function getManualAssignmentDashboard() {
         id: specialist.id,
         name: specialist.name,
         supportsCouples: specialist.supportsCouples,
+        workingHours:
+          availability?.workingHours ||
+          normalizeSpecialistWorkingHours(
+            specialist.standardStartHour,
+            specialist.standardEndHour,
+          ),
+        blockWindows:
+          availability?.blockWindows ||
+          resolveManualAssignmentBlockWindows(
+            normalizeSpecialistWorkingHours(
+              specialist.standardStartHour,
+              specialist.standardEndHour,
+            ),
+          ),
         availability: availability
           ? {
               counts: availability.counts,
@@ -3030,6 +3244,8 @@ export async function getCaseSpecialistAvailability(caseId: string) {
       id: true,
       name: true,
       supportsCouples: true,
+      standardStartHour: true,
+      standardEndHour: true,
     },
     orderBy: {
       name: "asc",
@@ -3057,6 +3273,11 @@ export async function getCaseSpecialistAvailability(caseId: string) {
   const schedulingProvider = await createSchedulingProvider(db);
   const availabilityBySpecialist = await Promise.all(
     specialists.map(async (specialist) => {
+      const workingHours = normalizeSpecialistWorkingHours(
+        specialist.standardStartHour,
+        specialist.standardEndHour,
+      );
+      const blockWindows = resolveManualAssignmentBlockWindows(workingHours);
       const eventType = resolveSchedulingEventType(specialist, participantCount);
 
       try {
@@ -3075,7 +3296,10 @@ export async function getCaseSpecialistAvailability(caseId: string) {
                 ) || null
               : null
             : slots.find((slot) =>
-                slotMatchesAnyManualTimeBlock(slot, manualTargetBlocks),
+                slotMatchesAnyManualTimeBlock(slot, manualTargetBlocks, {
+                  workingHours,
+                  blockWindows,
+                }),
               ) || null;
 
         return {
@@ -3084,6 +3308,8 @@ export async function getCaseSpecialistAvailability(caseId: string) {
           supportsCouples: specialist.supportsCouples,
           eventType,
           providerSlotCount: slots.length,
+          workingHours,
+          blockWindows,
           nextProviderSlot,
           nextClientMatchedSlot,
           error: null as string | null,
@@ -3095,6 +3321,8 @@ export async function getCaseSpecialistAvailability(caseId: string) {
           supportsCouples: specialist.supportsCouples,
           eventType,
           providerSlotCount: 0,
+          workingHours,
+          blockWindows,
           nextProviderSlot: null,
           nextClientMatchedSlot: null,
           error:
@@ -3190,7 +3418,14 @@ export async function getSpecialistAvailabilityCalendar(
   dayCount?: number,
   startDate?: Date | string,
 ) {
-  const days = normalizeGridDayCount(dayCount);
+  const operationalSettings = await getOperationalSettings();
+  const defaultGridDays =
+    operationalSettings.specialistAvailabilityDefaultGridDays ||
+    FALLBACK_SPECIALIST_AVAILABILITY_GRID_DAYS;
+  const maxGridDays =
+    operationalSettings.specialistAvailabilityMaxGridDays ||
+    FALLBACK_SPECIALIST_AVAILABILITY_MAX_GRID_DAYS;
+  const days = normalizeGridDayCount(dayCount, defaultGridDays, maxGridDays);
   const rangeStart = normalizeGridStartDate(startDate);
   const rangeEnd = addDays(rangeStart, days);
 
@@ -3202,12 +3437,19 @@ export async function getSpecialistAvailabilityCalendar(
       id: true,
       name: true,
       active: true,
+      standardStartHour: true,
+      standardEndHour: true,
     },
   });
 
   if (!specialist) {
     throw new DomainError("Counsellor not found.", 404);
   }
+
+  const workingHours = normalizeSpecialistWorkingHours(
+    specialist.standardStartHour,
+    specialist.standardEndHour,
+  );
 
   const [availabilityWindows, sessions] = await Promise.all([
     db.specialistAvailabilityWindow.findMany({
@@ -3266,8 +3508,8 @@ export async function getSpecialistAvailabilityCalendar(
     rangeStart: rangeStart.toISOString(),
     rangeEnd: rangeEnd.toISOString(),
     slotPolicy: {
-      startHour: MANUAL_ASSIGNMENT_DAY_START_HOUR,
-      endHour: MANUAL_ASSIGNMENT_DAY_END_HOUR,
+      startHour: workingHours.startHour,
+      endHour: workingHours.endHour,
       slotMinutes: MANUAL_ASSIGNMENT_SLOT_MINUTES,
     },
     windows: availabilityWindows.map((window) => ({
@@ -3315,21 +3557,6 @@ export async function addSpecialistAvailabilitySlot(input: {
     throw new DomainError("Availability slots must start and end on the hour.", 409);
   }
 
-  const startHour = startTime.getHours();
-  const endHour = endTime.getHours();
-  if (
-    startHour < MANUAL_ASSIGNMENT_DAY_START_HOUR ||
-    endHour > MANUAL_ASSIGNMENT_DAY_END_HOUR
-  ) {
-    throw new DomainError(
-      `Availability slots must be between ${String(MANUAL_ASSIGNMENT_DAY_START_HOUR).padStart(2, "0")}:00 and ${String(MANUAL_ASSIGNMENT_DAY_END_HOUR).padStart(2, "0")}:00.`,
-      409,
-    );
-  }
-
-  const availabilityType =
-    normalizeSpecialistAvailabilityType(input.availabilityType) || "AVAILABLE";
-
   const specialist = await db.specialist.findUnique({
     where: {
       id: input.specialistId,
@@ -3337,12 +3564,30 @@ export async function addSpecialistAvailabilitySlot(input: {
     select: {
       id: true,
       name: true,
+      standardStartHour: true,
+      standardEndHour: true,
     },
   });
 
   if (!specialist) {
     throw new DomainError("Counsellor not found.", 404);
   }
+
+  const workingHours = normalizeSpecialistWorkingHours(
+    specialist.standardStartHour,
+    specialist.standardEndHour,
+  );
+  const startHour = startTime.getHours();
+  const endHour = endTime.getHours();
+  if (startHour < workingHours.startHour || endHour > workingHours.endHour) {
+    throw new DomainError(
+      `Availability slots for ${specialist.name} must be between ${String(workingHours.startHour).padStart(2, "0")}:00 and ${String(workingHours.endHour).padStart(2, "0")}:00.`,
+      409,
+    );
+  }
+
+  const availabilityType =
+    normalizeSpecialistAvailabilityType(input.availabilityType) || "AVAILABLE";
 
   const overlappingSession = await db.session.findFirst({
     where: {
@@ -3488,6 +3733,10 @@ export async function addSpecialistAvailabilityPresetBatch(input: {
   timezone?: string;
   source?: string;
 }) {
+  const operationalSettings = await getOperationalSettings();
+  const maxGridDays =
+    operationalSettings.specialistAvailabilityMaxGridDays ||
+    FALLBACK_SPECIALIST_AVAILABILITY_MAX_GRID_DAYS;
   const startDate = parseAvailabilityDate(input.startDate, "startDate");
   const endDate = parseAvailabilityDate(input.endDate, "endDate");
   startDate.setHours(0, 0, 0, 0);
@@ -3498,9 +3747,9 @@ export async function addSpecialistAvailabilityPresetBatch(input: {
   }
 
   const rangeDays = Math.round((endDate.getTime() - startDate.getTime()) / 86_400_000) + 1;
-  if (rangeDays > MAX_SPECIALIST_AVAILABILITY_GRID_DAYS) {
+  if (rangeDays > maxGridDays) {
     throw new DomainError(
-      `Preset range cannot exceed ${MAX_SPECIALIST_AVAILABILITY_GRID_DAYS} days.`,
+      `Preset range cannot exceed ${maxGridDays} days.`,
       409,
     );
   }
@@ -3526,11 +3775,18 @@ export async function addSpecialistAvailabilityPresetBatch(input: {
     select: {
       id: true,
       name: true,
+      standardStartHour: true,
+      standardEndHour: true,
     },
   });
   if (!specialist) {
     throw new DomainError("Counsellor not found.", 404);
   }
+  const workingHours = normalizeSpecialistWorkingHours(
+    specialist.standardStartHour,
+    specialist.standardEndHour,
+  );
+  const blockWindows = resolveManualAssignmentBlockWindows(workingHours);
 
   const queryRangeEnd = addDays(endDate, 1);
 
@@ -3607,7 +3863,10 @@ export async function addSpecialistAvailabilityPresetBatch(input: {
     const day = addDays(startDate, dayOffset);
 
     for (const block of normalizedBlocks) {
-      const window = getManualAssignmentBlockWindow(block);
+      const window = getManualAssignmentBlockWindow(block, blockWindows);
+      if (window.endHour <= window.startHour) {
+        continue;
+      }
       for (
         let hour = window.startHour;
         hour + MANUAL_ASSIGNMENT_SLOT_MINUTES / 60 <= window.endHour;
@@ -3879,9 +4138,16 @@ export async function createSpecialist(input: {
   calCouplesEventTypeId?: string;
   password?: string;
   notes?: string;
+  standardStartHour?: number;
+  standardEndHour?: number;
 }) {
+  const operationalSettings = await getOperationalSettings();
   const normalizedEmail = input.email.toLowerCase().trim();
   const normalizedCalUserId = input.calUserId.trim();
+  const normalizedWorkingHours = normalizeSpecialistWorkingHours(
+    input.standardStartHour ?? operationalSettings.defaultSpecialistStandardStartHour,
+    input.standardEndHour ?? operationalSettings.defaultSpecialistStandardEndHour,
+  );
 
   const existingUser = await db.userAccount.findUnique({
     where: {
@@ -3916,6 +4182,8 @@ export async function createSpecialist(input: {
       name: input.name.trim(),
       email: normalizedEmail,
       supportsCouples: input.supportsCouples,
+      standardStartHour: normalizedWorkingHours.startHour,
+      standardEndHour: normalizedWorkingHours.endHour,
       capabilities: input.capabilities,
       notes: input.notes?.trim() || null,
       calUserId: normalizedCalUserId,
@@ -3939,6 +4207,8 @@ export async function updateSpecialistProfile(input: {
   email: string;
   supportsCouples: boolean;
   active: boolean;
+  standardStartHour: number;
+  standardEndHour: number;
   capabilities: string[];
   notes?: string;
   calUserId: string;
@@ -3952,6 +4222,10 @@ export async function updateSpecialistProfile(input: {
   const normalizedCalUserId = input.calUserId.trim();
   const normalizedIndividualEventTypeId = input.calIndividualEventTypeId.trim();
   const normalizedCouplesEventTypeId = input.calCouplesEventTypeId?.trim() || null;
+  const normalizedWorkingHours = normalizeSpecialistWorkingHours(
+    input.standardStartHour,
+    input.standardEndHour,
+  );
 
   if (
     !normalizedName ||
@@ -4054,6 +4328,20 @@ export async function updateSpecialistProfile(input: {
       specialist.active !== input.active
         ? { from: specialist.active, to: input.active }
         : null,
+    standardWorkingHours:
+      specialist.standardStartHour !== normalizedWorkingHours.startHour ||
+      specialist.standardEndHour !== normalizedWorkingHours.endHour
+        ? {
+            from: {
+              startHour: specialist.standardStartHour,
+              endHour: specialist.standardEndHour,
+            },
+            to: {
+              startHour: normalizedWorkingHours.startHour,
+              endHour: normalizedWorkingHours.endHour,
+            },
+          }
+        : null,
     capabilities:
       JSON.stringify(specialist.capabilities) !== JSON.stringify(input.capabilities)
         ? { from: specialist.capabilities, to: input.capabilities }
@@ -4092,6 +4380,8 @@ export async function updateSpecialistProfile(input: {
         email: normalizedEmail,
         supportsCouples: input.supportsCouples,
         active: input.active,
+        standardStartHour: normalizedWorkingHours.startHour,
+        standardEndHour: normalizedWorkingHours.endHour,
         capabilities: input.capabilities,
         notes: normalizedNotes,
         calUserId: normalizedCalUserId,

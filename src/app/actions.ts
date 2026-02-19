@@ -341,6 +341,20 @@ export async function createSpecialistAction(formData: FormData) {
   const calIndividualEventTypeId = String(formData.get("calIndividualEventTypeId") || "").trim();
   const calCouplesEventTypeId = String(formData.get("calCouplesEventTypeId") || "").trim();
   const redirectTo = String(formData.get("redirectTo") || "/admin/specialists");
+  let standardStartHour = 9;
+  let standardEndHour = 18;
+  try {
+    standardStartHour = parseIntegerField(formData, "standardStartHour", "Standard start hour", {
+      min: 0,
+      max: 22,
+    });
+    standardEndHour = parseIntegerField(formData, "standardEndHour", "Standard end hour", {
+      min: 1,
+      max: 23,
+    });
+  } catch (error) {
+    redirect(encodeErrorPath(redirectTo, domainErrorMessage(error)));
+  }
 
   if (!name || !email || !calUserId || !calIndividualEventTypeId) {
     redirect(
@@ -360,6 +374,15 @@ export async function createSpecialistAction(formData: FormData) {
     );
   }
 
+  if (standardEndHour <= standardStartHour) {
+    redirect(
+      encodeErrorPath(
+        redirectTo,
+        "Standard end hour must be after standard start hour.",
+      ),
+    );
+  }
+
   try {
     await createSpecialist({
       name,
@@ -371,6 +394,8 @@ export async function createSpecialistAction(formData: FormData) {
       calUserId,
       calIndividualEventTypeId,
       calCouplesEventTypeId: calCouplesEventTypeId || undefined,
+      standardStartHour,
+      standardEndHour,
     });
 
     revalidatePath("/admin/specialists");
@@ -401,6 +426,20 @@ export async function updateSpecialistProfileAction(formData: FormData) {
   const calIndividualEventTypeId = String(formData.get("calIndividualEventTypeId") || "").trim();
   const calCouplesEventTypeId = String(formData.get("calCouplesEventTypeId") || "").trim();
   const redirectTo = String(formData.get("redirectTo") || `/admin/specialists/${specialistId}`);
+  let standardStartHour = 9;
+  let standardEndHour = 18;
+  try {
+    standardStartHour = parseIntegerField(formData, "standardStartHour", "Standard start hour", {
+      min: 0,
+      max: 22,
+    });
+    standardEndHour = parseIntegerField(formData, "standardEndHour", "Standard end hour", {
+      min: 1,
+      max: 23,
+    });
+  } catch (error) {
+    redirect(encodeErrorPath(redirectTo, domainErrorMessage(error)));
+  }
 
   if (!specialistId || !name || !email || !calUserId || !calIndividualEventTypeId) {
     redirect(
@@ -420,6 +459,15 @@ export async function updateSpecialistProfileAction(formData: FormData) {
     );
   }
 
+  if (standardEndHour <= standardStartHour) {
+    redirect(
+      encodeErrorPath(
+        redirectTo,
+        "Standard end hour must be after standard start hour.",
+      ),
+    );
+  }
+
   let destination = appendQuery(redirectTo, "updated", "1");
 
   try {
@@ -434,6 +482,8 @@ export async function updateSpecialistProfileAction(formData: FormData) {
       calUserId,
       calIndividualEventTypeId,
       calCouplesEventTypeId: calCouplesEventTypeId || undefined,
+      standardStartHour,
+      standardEndHour,
       actorUserId: user.id,
     });
 
@@ -559,6 +609,50 @@ export async function updateOperationalSettingsAction(formData: FormData) {
     if (!defaultIntakeSource) {
       redirect(encodeErrorPath(redirectTo, "Default intake source is invalid."));
     }
+    const defaultSpecialistStandardStartHour = parseIntegerField(
+      formData,
+      "defaultSpecialistStandardStartHour",
+      "Default counsellor start hour",
+      {
+        min: 0,
+        max: 22,
+      },
+    );
+    const defaultSpecialistStandardEndHour = parseIntegerField(
+      formData,
+      "defaultSpecialistStandardEndHour",
+      "Default counsellor end hour",
+      {
+        min: 1,
+        max: 23,
+      },
+    );
+    if (defaultSpecialistStandardEndHour <= defaultSpecialistStandardStartHour) {
+      redirect(
+        encodeErrorPath(
+          redirectTo,
+          "Default counsellor end hour must be after default counsellor start hour.",
+        ),
+      );
+    }
+    const specialistAvailabilityDefaultGridDays = parsePositiveIntegerField(
+      formData,
+      "specialistAvailabilityDefaultGridDays",
+      "Availability calendar default range",
+    );
+    const specialistAvailabilityMaxGridDays = parsePositiveIntegerField(
+      formData,
+      "specialistAvailabilityMaxGridDays",
+      "Availability calendar max range",
+    );
+    if (specialistAvailabilityMaxGridDays < specialistAvailabilityDefaultGridDays) {
+      redirect(
+        encodeErrorPath(
+          redirectTo,
+          "Availability calendar max range must be greater than or equal to default range.",
+        ),
+      );
+    }
 
     await updateOperationalSettings(
       {
@@ -579,6 +673,8 @@ export async function updateOperationalSettingsAction(formData: FormData) {
           "defaultCoupleSessionMinutes",
           "Default couple session minutes",
         ),
+        defaultSpecialistStandardStartHour,
+        defaultSpecialistStandardEndHour,
         manualProviderHorizonDays: parsePositiveIntegerField(
           formData,
           "manualProviderHorizonDays",
@@ -650,6 +746,8 @@ export async function updateOperationalSettingsAction(formData: FormData) {
           "formAccessSessionHours",
           "PIN access session hours",
         ),
+        specialistAvailabilityDefaultGridDays,
+        specialistAvailabilityMaxGridDays,
       },
       user.id,
     );

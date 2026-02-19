@@ -170,6 +170,19 @@ export default async function SpecialistProfilePage({
               </p>
             </div>
 
+            <div className="rounded-xl border border-[color:var(--border)] p-4">
+              <p className="text-xs font-semibold uppercase tracking-wide text-[color:var(--muted)]">
+                Standard working hours
+              </p>
+              <p className="mt-1 text-sm">
+                {String(specialist.standardStartHour).padStart(2, "0")}:00-
+                {String(specialist.standardEndHour).padStart(2, "0")}:00
+              </p>
+              <p className="mt-2 text-xs text-[color:var(--muted)]">
+                Used for manual assignment and availability defaults.
+              </p>
+            </div>
+
             <div
               className={`rounded-xl border border-[color:var(--border)] p-4 md:col-span-2 ${calSectionMutedClass}`}
             >
@@ -261,6 +274,39 @@ export default async function SpecialistProfilePage({
                   required
                   className={calFieldClass}
                 />
+              </div>
+
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label htmlFor="standardStartHour" className="mb-1 block text-xs font-medium">
+                    Standard start hour
+                  </label>
+                  <input
+                    id="standardStartHour"
+                    name="standardStartHour"
+                    type="number"
+                    min={0}
+                    max={22}
+                    defaultValue={specialist.standardStartHour}
+                    required
+                    className="w-full rounded-md border border-[color:var(--border)] px-2 py-2 text-sm"
+                  />
+                </div>
+                <div>
+                  <label htmlFor="standardEndHour" className="mb-1 block text-xs font-medium">
+                    Standard end hour
+                  </label>
+                  <input
+                    id="standardEndHour"
+                    name="standardEndHour"
+                    type="number"
+                    min={1}
+                    max={23}
+                    defaultValue={specialist.standardEndHour}
+                    required
+                    className="w-full rounded-md border border-[color:var(--border)] px-2 py-2 text-sm"
+                  />
+                </div>
               </div>
 
               <div>

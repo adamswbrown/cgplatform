@@ -11,6 +11,10 @@ import { useRouter } from "next/navigation";
 
 type TimeBlock = "MORNING" | "AFTERNOON" | "EVENING";
 type BoardViewMode = "kanban" | "calendar";
+type BlockWindow = {
+  startHour: number;
+  endHour: number;
+};
 
 type AssignmentCase = {
   id: string;
@@ -43,6 +47,11 @@ type AssignmentSpecialist = {
   id: string;
   name: string;
   supportsCouples: boolean;
+  workingHours: {
+    startHour: number;
+    endHour: number;
+  };
+  blockWindows: Record<TimeBlock, BlockWindow>;
   availability: {
     counts: Record<TimeBlock, number>;
     next: Record<TimeBlock, string | null>;
@@ -68,22 +77,21 @@ const BLOCK_LABELS: Record<TimeBlock, string> = {
   AFTERNOON: "Afternoon",
   EVENING: "Evening",
 };
-const BLOCK_WINDOWS: Record<TimeBlock, string> = {
-  MORNING: "09:00-12:00",
-  AFTERNOON: "12:00-17:00",
-  EVENING: "17:00-18:00",
-};
 
 function assignmentKey(specialistId: string, block: TimeBlock) {
   return `${specialistId}:${block}`;
 }
 
-function blockFromHour(hour: number): TimeBlock {
-  if (hour < 12) {
-    return "MORNING";
-  }
-  if (hour < 17) {
-    return "AFTERNOON";
+function formatWindowLabel(window: BlockWindow) {
+  return `${String(window.startHour).padStart(2, "0")}:00-${String(window.endHour).padStart(2, "0")}:00`;
+}
+
+function blockFromHour(hour: number, blockWindows: Record<TimeBlock, BlockWindow>): TimeBlock {
+  for (const block of BLOCKS) {
+    const window = blockWindows[block];
+    if (hour >= window.startHour && hour < window.endHour) {
+      return block;
+    }
   }
   return "EVENING";
 }
@@ -260,6 +268,14 @@ export function ManualAssignmentBoard({
   const [placements, setPlacements] = useState<Record<string, CasePlacement>>(() =>
     buildPlacementMap(assignedCases),
   );
+  const specialistById = useMemo(
+    () =>
+      specialists.reduce<Record<string, AssignmentSpecialist>>((acc, specialist) => {
+        acc[specialist.id] = specialist;
+        return acc;
+      }, {}),
+    [specialists],
+  );
   const [selectedCase, setSelectedCase] = useState<AssignmentCase | null>(null);
   const [notice, setNotice] = useState<{ type: "success" | "error"; message: string } | null>(
     null,
@@ -387,9 +403,10 @@ export function ManualAssignmentBoard({
         .sort()
         .at(-1) ?? preferredStartTime ?? null;
     const activeSessionDate = activeSessionStart ? new Date(activeSessionStart) : null;
+    const specialist = specialistById[specialistId];
     const laneBlock =
-      activeSessionDate && !Number.isNaN(activeSessionDate.getTime())
-        ? blockFromHour(activeSessionDate.getHours())
+      activeSessionDate && !Number.isNaN(activeSessionDate.getTime()) && specialist
+        ? blockFromHour(activeSessionDate.getHours(), specialist.blockWindows)
         : preferredTimeBlock;
     const targetLaneKey = assignmentKey(specialistId, laneBlock);
 
@@ -735,6 +752,7 @@ export function ManualAssignmentBoard({
                     {BLOCKS.map((block) => {
                       const key = assignmentKey(specialist.id, block);
                       const laneAssignments = assignments[key] || [];
+                      const blockWindow = specialist.blockWindows[block];
                       return (
                         <div
                           key={key}
@@ -749,7 +767,7 @@ export function ManualAssignmentBoard({
                             <p className="text-sm font-semibold">
                               {BLOCK_LABELS[block]}{" "}
                               <span className="text-xs text-[color:var(--muted)]">
-                                ({BLOCK_WINDOWS[block]})
+                                ({formatWindowLabel(blockWindow)})
                               </span>
                             </p>
                             <span className="rounded-full border border-[color:var(--border)] bg-white px-2 py-0.5 text-xs">
@@ -852,7 +870,7 @@ export function ManualAssignmentBoard({
                       </p>
                     </div>
                     <p className="text-xs text-[color:var(--muted)]">
-                      Calendar grid: drop into a specific available 60-minute slot.
+                      Calendar grid: drop into a specific available {`${slotPolicy.slotMinutes}-minute`} slot.
                     </p>
                   </header>
 
@@ -880,7 +898,7 @@ export function ManualAssignmentBoard({
                               const key = slotKey(slotDate);
                               const availableSlotIso = availableSlotByKey[key] || null;
                               const assignedAtSlot = assignedBySlotKey[key] || [];
-                              const block = blockFromHour(hour);
+                              const block = blockFromHour(hour, specialist.blockWindows);
                               const sourceKey = assignmentKey(specialist.id, block);
 
                               return (

@@ -32,6 +32,10 @@ type ScheduledSession = {
 
 type CalendarView = "dayGridMonth" | "timeGridWeek" | "timeGridDay";
 type PresetBlock = "MORNING" | "AFTERNOON" | "EVENING";
+type PresetBlockWindow = {
+  startHour: number;
+  endHour: number;
+};
 
 type SpecialistAvailabilityCalendarProps = {
   specialistId: string;
@@ -112,6 +116,32 @@ function formatTimeLabel(value: Date) {
     hour: "2-digit",
     minute: "2-digit",
   }).format(value);
+}
+
+function buildPresetBlockWindows(slotPolicy: SlotPolicy): Record<PresetBlock, PresetBlockWindow> {
+  const morningEnd = Math.min(12, slotPolicy.endHour);
+  const afternoonStart = Math.max(12, slotPolicy.startHour);
+  const afternoonEnd = Math.min(17, slotPolicy.endHour);
+  const eveningStart = Math.max(17, slotPolicy.startHour);
+
+  return {
+    MORNING: {
+      startHour: slotPolicy.startHour,
+      endHour: Math.max(slotPolicy.startHour, morningEnd),
+    },
+    AFTERNOON: {
+      startHour: afternoonStart,
+      endHour: Math.max(afternoonStart, afternoonEnd),
+    },
+    EVENING: {
+      startHour: eveningStart,
+      endHour: Math.max(eveningStart, slotPolicy.endHour),
+    },
+  };
+}
+
+function formatWindowLabel(window: PresetBlockWindow) {
+  return `${String(window.startHour).padStart(2, "0")}:00-${String(window.endHour).padStart(2, "0")}:00`;
 }
 
 function expandAvailabilityWindows(windows: AvailabilityWindow[], slotMinutes: number) {
@@ -243,6 +273,8 @@ export function SpecialistAvailabilityCalendar({
 
     return [...availabilityEvents, ...bookedEvents];
   }, [availabilityByKey, sessionByKey]);
+
+  const presetBlockWindows = useMemo(() => buildPresetBlockWindows(slotPolicy), [slotPolicy]);
 
   const availableCount = Object.values(availabilityByKey).filter(
     (entry) => entry.availabilityType === "AVAILABLE",
@@ -690,7 +722,8 @@ export function SpecialistAvailabilityCalendar({
         <p className="text-sm font-semibold">Batch Availability Presets</p>
         <p className="mt-1 text-xs text-[color:var(--muted)]">
           Apply morning/afternoon/evening blocks across a date range as{" "}
-          <strong>{availabilityTypeLabel(entryMode).toLowerCase()}</strong>. Slots stay 60 minutes.
+          <strong>{availabilityTypeLabel(entryMode).toLowerCase()}</strong>. Slots stay{" "}
+          {slotPolicy.slotMinutes} minutes.
         </p>
         <div className="mt-3 grid gap-3 md:grid-cols-2 xl:grid-cols-5">
           <label className="text-xs">
@@ -718,7 +751,7 @@ export function SpecialistAvailabilityCalendar({
               onChange={() => togglePresetBlock("MORNING")}
               className="mr-2"
             />
-            Morning (09:00-12:00)
+            Morning ({formatWindowLabel(presetBlockWindows.MORNING)})
           </label>
           <label className="text-xs">
             <input
@@ -727,7 +760,7 @@ export function SpecialistAvailabilityCalendar({
               onChange={() => togglePresetBlock("AFTERNOON")}
               className="mr-2"
             />
-            Afternoon (12:00-17:00)
+            Afternoon ({formatWindowLabel(presetBlockWindows.AFTERNOON)})
           </label>
           <label className="text-xs">
             <input
@@ -736,7 +769,7 @@ export function SpecialistAvailabilityCalendar({
               onChange={() => togglePresetBlock("EVENING")}
               className="mr-2"
             />
-            Evening (17:00-18:00)
+            Evening ({formatWindowLabel(presetBlockWindows.EVENING)})
           </label>
         </div>
         <div className="mt-3">

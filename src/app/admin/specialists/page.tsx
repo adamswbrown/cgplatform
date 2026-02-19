@@ -100,6 +100,38 @@ export default async function SpecialistManagementPage({
           </div>
 
           <div>
+            <label htmlFor="standardStartHour" className="mb-1 block text-sm font-medium">
+              Standard start hour (24h)
+            </label>
+            <input
+              id="standardStartHour"
+              name="standardStartHour"
+              type="number"
+              min={0}
+              max={22}
+              defaultValue={operationalSettings.defaultSpecialistStandardStartHour}
+              className="w-full rounded-md border border-[color:var(--border)] px-3 py-2 text-sm"
+              required
+            />
+          </div>
+
+          <div>
+            <label htmlFor="standardEndHour" className="mb-1 block text-sm font-medium">
+              Standard end hour (24h)
+            </label>
+            <input
+              id="standardEndHour"
+              name="standardEndHour"
+              type="number"
+              min={1}
+              max={23}
+              defaultValue={operationalSettings.defaultSpecialistStandardEndHour}
+              className="w-full rounded-md border border-[color:var(--border)] px-3 py-2 text-sm"
+              required
+            />
+          </div>
+
+          <div>
             <label htmlFor="calUserId" className={`mb-1 block text-sm font-medium ${calLabelClass}`}>
               Cal.com user id
             </label>
@@ -189,6 +221,7 @@ export default async function SpecialistManagementPage({
               <tr>
                 <th className="px-3 py-2 font-semibold">Name</th>
                 <th className="px-3 py-2 font-semibold">Email</th>
+                <th className="px-3 py-2 font-semibold">Standard Hours</th>
                 <th className={`px-3 py-2 font-semibold ${calCellClass}`}>Cal User</th>
                 <th className="px-3 py-2 font-semibold">Couples</th>
                 <th className={`px-3 py-2 font-semibold ${calCellClass}`}>Event Type IDs</th>
@@ -209,6 +242,10 @@ export default async function SpecialistManagementPage({
                       </Link>
                     </td>
                     <td className="px-3 py-2">{specialist.email}</td>
+                    <td className="px-3 py-2">
+                      {String(specialist.standardStartHour).padStart(2, "0")}:00-
+                      {String(specialist.standardEndHour).padStart(2, "0")}:00
+                    </td>
                     <td className={`px-3 py-2 ${calCellClass}`}>{specialist.calUserId}</td>
                     <td className="px-3 py-2">{specialist.supportsCouples ? "Yes" : "No"}</td>
                     <td className={`px-3 py-2 ${calCellClass}`}>

@@ -157,6 +157,8 @@ model Specialist {
   email                     String       @unique
   supportsCouples           Boolean      @default(false)
   active                    Boolean      @default(true)
+  standardStartHour         Int          @default(9)
+  standardEndHour           Int          @default(18)
   capabilities              String[]     @default([])
   notes                     String?
   calUserId                 String       @unique

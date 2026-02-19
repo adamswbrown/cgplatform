@@ -10,7 +10,7 @@ import {
 } from "@/lib/case-service";
 
 const querySchema = z.object({
-  days: z.coerce.number().int().min(1).max(62).optional(),
+  days: z.coerce.number().int().min(1).max(180).optional(),
   startDate: z.string().datetime({ offset: true }).optional(),
 });
 

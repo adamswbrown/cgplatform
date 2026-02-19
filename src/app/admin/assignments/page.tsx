@@ -20,7 +20,7 @@ export default async function ManualAssignmentsPage({
   return (
     <AuthenticatedShell
       title="Manual Assignment Board"
-      subtitle="Use Kanban or Calendar Grid mode to assign, reassign, and unassign cases against 60-minute slots from 09:00 to 18:00."
+      subtitle={`Use Kanban or Calendar Grid mode to assign, reassign, and unassign cases against ${dashboard.slotPolicy.slotMinutes}-minute slots from ${String(dashboard.slotPolicy.startHour).padStart(2, "0")}:00 to ${String(dashboard.slotPolicy.endHour).padStart(2, "0")}:00.`}
       userName={user.name}
       role={user.role}
       navItems={[

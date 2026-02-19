@@ -36,5 +36,5 @@ export interface SchedulingProvider {
 
 export type SchedulingPersistence = Pick<
   Prisma.TransactionClient,
-  "session" | "specialistAvailabilityWindow"
+  "session" | "specialist" | "specialistAvailabilityWindow"
 >;
