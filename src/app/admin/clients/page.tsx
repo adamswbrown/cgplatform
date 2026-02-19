@@ -12,15 +12,16 @@ export default async function AdminClientsPage() {
   return (
     <AuthenticatedShell
       title="Client Dashboard"
-      subtitle="Operations view of all clients, linked cases, and current specialist coverage."
+      subtitle="Operations view of all clients, linked cases, and current counsellor coverage."
       userName={user.name}
       role={user.role}
       navItems={[
         { href: "/admin/cases", label: "All Cases" },
+        { href: "/admin/assignments", label: "Assignments" },
         { href: "/admin/clients", label: "All Clients" },
-        { href: "/admin/specialists", label: "Specialists" },
+        { href: "/admin/specialists", label: "Counsellors" },
         { href: "/admin/workflows", label: "Workflows" },
-        { href: "/admin/settings/intake", label: "Intake Settings" },
+        { href: "/admin/settings", label: "Settings" },
         { href: "/intake", label: "Secure Intake" },
       ]}
     >
@@ -32,7 +33,7 @@ export default async function AdminClientsPage() {
                 <th className="px-4 py-3 font-semibold">Client</th>
                 <th className="px-4 py-3 font-semibold">Contact</th>
                 <th className="px-4 py-3 font-semibold">Case Summary</th>
-                <th className="px-4 py-3 font-semibold">Assigned Specialists</th>
+                <th className="px-4 py-3 font-semibold">Assigned Counsellors</th>
                 <th className="px-4 py-3 font-semibold">Cases</th>
               </tr>
             </thead>

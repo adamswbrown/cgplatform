@@ -1,5 +1,7 @@
+import Link from "next/link";
 import { UserRole } from "@prisma/client";
 import { AuthenticatedShell } from "@/components/authenticated-shell";
+import { IntakeStructuredEditors } from "@/components/admin/intake-structured-editors";
 import { requirePageUser } from "@/lib/auth";
 import { getIntakeFormContent } from "@/lib/intake-settings";
 import { updateIntakeFormContentAction } from "@/app/actions";
@@ -23,10 +25,11 @@ export default async function IntakeSettingsPage({ searchParams }: IntakeSetting
       role={user.role}
       navItems={[
         { href: "/admin/cases", label: "All Cases" },
+        { href: "/admin/assignments", label: "Assignments" },
         { href: "/admin/clients", label: "All Clients" },
-        { href: "/admin/specialists", label: "Specialists" },
+        { href: "/admin/specialists", label: "Counsellors" },
         { href: "/admin/workflows", label: "Workflows" },
-        { href: "/admin/settings/intake", label: "Intake Settings" },
+        { href: "/admin/settings", label: "Settings" },
         { href: "/intake", label: "Secure Intake" },
       ]}
     >
@@ -40,6 +43,14 @@ export default async function IntakeSettingsPage({ searchParams }: IntakeSetting
           Intake form content updated.
         </p>
       ) : null}
+
+      <p className="text-sm text-[color:var(--muted)]">
+        Looking for scheduling, duration, or PIN policy defaults? Use{" "}
+        <Link href="/admin/settings/operations" className="underline">
+          Operational Settings
+        </Link>
+        .
+      </p>
 
       <section className="cg-surface-card p-6">
         <form action={updateIntakeFormContentAction} className="space-y-5">
@@ -86,19 +97,10 @@ export default async function IntakeSettingsPage({ searchParams }: IntakeSetting
             />
           </div>
 
-          <div>
-            <label htmlFor="crisisContactsJson" className="mb-1 block text-sm font-medium">
-              Crisis contacts JSON
-            </label>
-            <textarea
-              id="crisisContactsJson"
-              name="crisisContactsJson"
-              rows={8}
-              defaultValue={JSON.stringify(content.crisisModal.contacts, null, 2)}
-              required
-              className="w-full px-3 py-2 font-mono text-sm"
-            />
-          </div>
+          <IntakeStructuredEditors
+            initialCrisisContacts={content.crisisModal.contacts}
+            initialAvailabilityNotes={content.availability.notes}
+          />
 
           <div>
             <label htmlFor="availabilitySubheading" className="mb-1 block text-sm font-medium">
@@ -111,20 +113,6 @@ export default async function IntakeSettingsPage({ searchParams }: IntakeSetting
               defaultValue={content.availability.subheading}
               required
               className="w-full px-3 py-2"
-            />
-          </div>
-
-          <div>
-            <label htmlFor="availabilityNotesJson" className="mb-1 block text-sm font-medium">
-              Availability notes JSON
-            </label>
-            <textarea
-              id="availabilityNotesJson"
-              name="availabilityNotesJson"
-              rows={8}
-              defaultValue={JSON.stringify(content.availability.notes, null, 2)}
-              required
-              className="w-full px-3 py-2 font-mono text-sm"
             />
           </div>
 

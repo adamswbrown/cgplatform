@@ -6,14 +6,12 @@ import {
   SessionStatus,
   UserRole,
 } from "@prisma/client";
+import { getOperationalSettings, normalizeIntakeSourceType } from "@/lib/admin-settings";
 import { db } from "@/lib/db";
 import { createSchedulingProvider } from "@/lib/scheduling";
+import { getSchedulingAssignmentMode, isAutoAllocationEnabled } from "@/lib/scheduling/config";
 import type { SchedulingCaseData, SchedulingEventType } from "@/lib/scheduling/types";
-import {
-  CASE_TRANSITIONS,
-  DOCUMENT_CODES,
-  REQUIRED_DOCUMENTS_TO_ENTER,
-} from "@/lib/workflow";
+import { CASE_TRANSITIONS, DOCUMENT_CODES } from "@/lib/workflow";
 
 export class DomainError extends Error {
   statusCode: number;
@@ -294,8 +292,229 @@ function normalizePhoneForMatch(value: string | null | undefined) {
   return normalized.length > 0 ? normalized : null;
 }
 
+type IntakeTimePreference = "MORNING" | "AFTERNOON" | "EVENING";
+export type ManualAssignmentTimeBlock = IntakeTimePreference;
+export type SpecialistAvailabilityType = "AVAILABLE" | "OUT_OF_OFFICE";
+
+const INTAKE_TIME_PREFERENCES: IntakeTimePreference[] = ["MORNING", "AFTERNOON", "EVENING"];
+const MANUAL_ASSIGNMENT_DAY_START_HOUR = 9;
+const MANUAL_ASSIGNMENT_DAY_END_HOUR = 18;
+const MANUAL_ASSIGNMENT_SLOT_MINUTES = 60;
+const DEFAULT_SPECIALIST_AVAILABILITY_GRID_DAYS = 14;
+const MAX_SPECIALIST_AVAILABILITY_GRID_DAYS = 62;
+const MANUAL_ASSIGNMENT_BLOCK_WINDOWS: Record<ManualAssignmentTimeBlock, {
+  startHour: number;
+  endHour: number;
+}> = {
+  MORNING: { startHour: 9, endHour: 12 },
+  AFTERNOON: { startHour: 12, endHour: 17 },
+  EVENING: { startHour: 17, endHour: 18 },
+};
+
+function getManualAssignmentBlockWindow(block: ManualAssignmentTimeBlock) {
+  return MANUAL_ASSIGNMENT_BLOCK_WINDOWS[block];
+}
+
+function normalizeIntakeTimePreference(value: string): IntakeTimePreference | null {
+  const normalized = value.trim().toUpperCase();
+  if (INTAKE_TIME_PREFERENCES.includes(normalized as IntakeTimePreference)) {
+    return normalized as IntakeTimePreference;
+  }
+
+  return null;
+}
+
+function normalizeSpecialistAvailabilityType(value: unknown): SpecialistAvailabilityType | null {
+  const normalized = String(value || "")
+    .trim()
+    .toUpperCase()
+    .replace(/[\s-]+/g, "_");
+
+  if (normalized === "AVAILABLE") {
+    return "AVAILABLE";
+  }
+  if (normalized === "OUT_OF_OFFICE" || normalized === "OUTOFOFFICE" || normalized === "OOO") {
+    return "OUT_OF_OFFICE";
+  }
+
+  return null;
+}
+
+function specialistAvailabilityTypeLabel(value: SpecialistAvailabilityType) {
+  return value === "OUT_OF_OFFICE" ? "out-of-office" : "available";
+}
+
+function parsePreferredStartTime(value: string | undefined) {
+  const raw = value?.trim();
+  if (!raw) {
+    return null;
+  }
+
+  const parsed = new Date(raw);
+  if (Number.isNaN(parsed.getTime())) {
+    throw new DomainError("Invalid preferred start time.", 400);
+  }
+
+  return parsed;
+}
+
+function extractIntakeTimePreferencesFromCase(caseRecord: {
+  intakeFormData: Prisma.JsonValue | null;
+}) {
+  const intakeFormData = caseRecord.intakeFormData;
+  if (!intakeFormData || typeof intakeFormData !== "object" || Array.isArray(intakeFormData)) {
+    return [] as IntakeTimePreference[];
+  }
+
+  const availability = (intakeFormData as Record<string, unknown>).availability;
+  if (!availability || typeof availability !== "object" || Array.isArray(availability)) {
+    return [] as IntakeTimePreference[];
+  }
+
+  const timePreferences = (availability as Record<string, unknown>).timePreferences;
+  if (!Array.isArray(timePreferences)) {
+    return [] as IntakeTimePreference[];
+  }
+
+  return Array.from(
+    new Set(
+      timePreferences
+        .map((entry) => (typeof entry === "string" ? normalizeIntakeTimePreference(entry) : null))
+        .filter((entry): entry is IntakeTimePreference => Boolean(entry)),
+    ),
+  );
+}
+
+function slotIsOnManualAssignmentGrid(slot: Date) {
+  const hour = slot.getHours();
+  const minute = slot.getMinutes();
+  return (
+    hour >= MANUAL_ASSIGNMENT_DAY_START_HOUR &&
+    hour < MANUAL_ASSIGNMENT_DAY_END_HOUR &&
+    minute === 0
+  );
+}
+
+function slotMatchesManualTimeBlock(slot: Date, block: ManualAssignmentTimeBlock) {
+  if (!slotIsOnManualAssignmentGrid(slot)) {
+    return false;
+  }
+
+  const hour = slot.getHours();
+  const window = MANUAL_ASSIGNMENT_BLOCK_WINDOWS[block];
+  return hour >= window.startHour && hour < window.endHour;
+}
+
+function slotMatchesAnyManualTimeBlock(
+  slot: Date,
+  blocks: ManualAssignmentTimeBlock[],
+) {
+  if (blocks.length === 0) {
+    return slotIsOnManualAssignmentGrid(slot);
+  }
+
+  return blocks.some((block) => slotMatchesManualTimeBlock(slot, block));
+}
+
+function resolveManualAssignmentTimeBlockForSlot(
+  slot: Date | null | undefined,
+): ManualAssignmentTimeBlock | null {
+  if (!slot) {
+    return null;
+  }
+
+  if (slotMatchesManualTimeBlock(slot, "MORNING")) {
+    return "MORNING";
+  }
+
+  if (slotMatchesManualTimeBlock(slot, "AFTERNOON")) {
+    return "AFTERNOON";
+  }
+
+  if (slotMatchesManualTimeBlock(slot, "EVENING")) {
+    return "EVENING";
+  }
+
+  return null;
+}
+
+type ManualAssignmentBoardCaseRecord = {
+  id: string;
+  reference: string;
+  status: CaseStatus;
+  counsellingType: string | null;
+  intakeFormData: Prisma.JsonValue | null;
+  participants: Array<{
+    client: {
+      id: string;
+      firstName: string;
+      lastName: string;
+    };
+  }>;
+  workflowStates: Array<{
+    step: {
+      name: string;
+    };
+  }>;
+};
+
+function mapCaseToManualAssignmentBoardCase(caseItem: ManualAssignmentBoardCaseRecord) {
+  const timePreferences = extractIntakeTimePreferencesFromCase(caseItem);
+  return {
+    id: caseItem.id,
+    reference: caseItem.reference,
+    status: caseItem.status,
+    participantCount: caseItem.participants.length,
+    participants: caseItem.participants.map((participant) => ({
+      id: participant.client.id,
+      fullName: `${participant.client.firstName} ${participant.client.lastName}`,
+    })),
+    counsellingType: caseItem.counsellingType,
+    timePreferences,
+    pendingBlockingSteps: caseItem.workflowStates.length,
+    pendingBlockingStepNames: caseItem.workflowStates
+      .map((state) => state.step.name)
+      .filter((value) => value.trim().length > 0),
+  };
+}
+
 function addMinutes(value: Date, minutes: number) {
   return new Date(value.getTime() + minutes * 60_000);
+}
+
+function addDays(value: Date, days: number) {
+  const next = new Date(value);
+  next.setDate(next.getDate() + days);
+  return next;
+}
+
+function normalizeGridDayCount(dayCount?: number) {
+  if (!Number.isFinite(dayCount)) {
+    return DEFAULT_SPECIALIST_AVAILABILITY_GRID_DAYS;
+  }
+
+  const rounded = Math.floor(Number(dayCount));
+  if (rounded < 1) {
+    return 1;
+  }
+
+  return Math.min(rounded, MAX_SPECIALIST_AVAILABILITY_GRID_DAYS);
+}
+
+function normalizeGridStartDate(startDate?: Date | string) {
+  if (!startDate) {
+    const now = new Date();
+    now.setHours(0, 0, 0, 0);
+    return now;
+  }
+
+  const parsed = startDate instanceof Date ? new Date(startDate) : new Date(startDate);
+  if (Number.isNaN(parsed.getTime())) {
+    throw new DomainError("Invalid start date supplied for counsellor availability calendar.", 400);
+  }
+
+  parsed.setHours(0, 0, 0, 0);
+  return parsed;
 }
 
 function parseAvailabilityDate(value: Date | string, fieldLabel: string) {
@@ -639,7 +858,7 @@ async function ensureRequiredDocumentsCompleted(
   caseId: string,
   targetStatus: CaseStatus,
 ) {
-  const requiredCodes = REQUIRED_DOCUMENTS_TO_ENTER[targetStatus] ?? [];
+  const requiredCodes = await resolveRequiredDocumentCodesForStatus(targetStatus);
 
   if (requiredCodes.length === 0) {
     return;
@@ -669,6 +888,24 @@ async function ensureRequiredDocumentsCompleted(
       409,
     );
   }
+}
+
+async function resolveRequiredDocumentCodesForStatus(status: CaseStatus) {
+  const operationalSettings = await getOperationalSettings();
+
+  if (status === CaseStatus.IN_SESSION) {
+    return operationalSettings.requireTermsBeforeInSession
+      ? [DOCUMENT_CODES.TERMS_AND_CONDITIONS]
+      : [];
+  }
+
+  if (status === CaseStatus.CLOSED) {
+    return operationalSettings.requireOuttakeBeforeClose
+      ? [DOCUMENT_CODES.OUTTAKE_FORM]
+      : [];
+  }
+
+  return [] as string[];
 }
 
 async function initializeCaseWorkflowStates(tx: Tx, caseId: string, caseWorkflowTemplateId: string) {
@@ -845,7 +1082,7 @@ function resolveSchedulingEventType(
   return "individual";
 }
 
-function resolveSessionDurationMinutes(flags: string[], participantCount: number) {
+async function resolveSessionDurationMinutes(flags: string[], participantCount: number) {
   const durationFlag = flags.find((flag) => flag.startsWith("duration:"));
   if (durationFlag) {
     const parsed = Number(durationFlag.split(":")[1]);
@@ -856,7 +1093,10 @@ function resolveSessionDurationMinutes(flags: string[], participantCount: number
     return Math.round(parsed);
   }
 
-  return participantCount === 2 ? 60 : 40;
+  const operationalSettings = await getOperationalSettings();
+  return participantCount === 2
+    ? operationalSettings.defaultCoupleSessionMinutes
+    : operationalSettings.defaultIndividualSessionMinutes;
 }
 
 function getPrimaryAttendee(caseRecord: CaseWithParticipantContacts) {
@@ -876,10 +1116,12 @@ export async function createCaseFromIntake(
   input: IntakeSubmissionInput,
   actorUserId?: string,
 ) {
+  const operationalSettings = await getOperationalSettings();
   const participantCount = input.secondary ? 2 : 1;
   const counsellingType = normalizeCounsellingType(input.counsellingType, participantCount);
   const initialStatus = input.initialStatus ?? CaseStatus.NEW;
-  const intakeSource = input.intakeSource?.trim() || "WEB_FORM";
+  const intakeSource =
+    normalizeIntakeSourceType(input.intakeSource) || operationalSettings.defaultIntakeSource;
   const intakeDocumentTriggerStatus =
     initialStatus === CaseStatus.AWAITING_REVIEW ? CaseStatus.NEW : initialStatus;
 
@@ -1017,7 +1259,14 @@ export async function createCaseFromIntake(
 
 export async function allocateCaseAutomatically(caseId: string, actorUserId?: string) {
   return db.$transaction(async (tx) => {
-    const schedulingProvider = createSchedulingProvider(tx);
+    if (!(await isAutoAllocationEnabled())) {
+      throw new DomainError(
+        "Automatic allocation is disabled in manual assignment mode. Use manual assignment from case detail.",
+        409,
+      );
+    }
+
+    const schedulingProvider = await createSchedulingProvider(tx);
     const caseRecord = await tx.case.findUnique({
       where: { id: caseId },
       include: {
@@ -1063,7 +1312,10 @@ export async function allocateCaseAutomatically(caseId: string, actorUserId?: st
 
     const participantCount = caseRecord.participants.length;
     const supportsCouplesRequired = participantCount === 2;
-    const durationMinutes = resolveSessionDurationMinutes(caseRecord.flags, participantCount);
+    const durationMinutes = await resolveSessionDurationMinutes(
+      caseRecord.flags,
+      participantCount,
+    );
     const caseAvailability = computeCaseAvailability(caseRecord, durationMinutes);
 
     if (!caseAvailability.hasOverlap) {
@@ -1098,8 +1350,8 @@ export async function allocateCaseAutomatically(caseId: string, actorUserId?: st
     if (specialists.length === 0) {
       throw new DomainError(
         supportsCouplesRequired
-          ? "No active specialists available for couples."
-          : "No active specialists available.",
+          ? "No active counsellors available for couples."
+          : "No active counsellors available.",
         409,
       );
     }
@@ -1262,10 +1514,13 @@ export async function overrideCaseAssignment(input: {
   specialistId: string;
   reason: string;
   matchingRuleOverride?: string;
+  preferredTimeBlock?: string;
+  preferredStartTime?: string;
   actorUserId: string;
 }) {
   return db.$transaction(async (tx) => {
-    const schedulingProvider = createSchedulingProvider(tx);
+    const assignmentMode = await getSchedulingAssignmentMode();
+    const schedulingProvider = await createSchedulingProvider(tx);
     const caseRecord = await tx.case.findUnique({
       where: { id: input.caseId },
       include: {
@@ -1315,51 +1570,225 @@ export async function overrideCaseAssignment(input: {
     });
 
     if (!specialist) {
-      throw new DomainError("Specialist not found.", 404);
+      throw new DomainError("Counsellor not found.", 404);
     }
 
     const participantCount = caseRecord.participants.length;
     const eventType = resolveSchedulingEventType(specialist, participantCount);
-    const durationMinutes = resolveSessionDurationMinutes(caseRecord.flags, participantCount);
-    const caseAvailability = computeCaseAvailability(caseRecord, durationMinutes);
+    const requestedDurationMinutes = await resolveSessionDurationMinutes(
+      caseRecord.flags,
+      participantCount,
+    );
+    const durationMinutes =
+      assignmentMode === "manual"
+        ? MANUAL_ASSIGNMENT_SLOT_MINUTES
+        : requestedDurationMinutes;
+    const intakeTimePreferences = extractIntakeTimePreferencesFromCase(caseRecord);
+    const preferredStartTime = parsePreferredStartTime(input.preferredStartTime);
+    const preferredStartTimeBlock = preferredStartTime
+      ? resolveManualAssignmentTimeBlockForSlot(preferredStartTime)
+      : null;
+    if (preferredStartTime && !preferredStartTimeBlock) {
+      throw new DomainError(
+        `Preferred start time must be between ${String(MANUAL_ASSIGNMENT_DAY_START_HOUR).padStart(2, "0")}:00 and ${String(MANUAL_ASSIGNMENT_DAY_END_HOUR).padStart(2, "0")}:00.`,
+        409,
+      );
+    }
+    const preferredTimeBlock = normalizeIntakeTimePreference(input.preferredTimeBlock || "");
+    const manualTargetBlocks =
+      preferredStartTimeBlock
+        ? [preferredStartTimeBlock]
+        : preferredTimeBlock
+        ? [preferredTimeBlock]
+        : intakeTimePreferences.length > 0
+          ? intakeTimePreferences
+          : INTAKE_TIME_PREFERENCES;
 
     await assertCaseEligibleForScheduling(tx, input.caseId);
 
-    if (!caseAvailability.hasOverlap) {
-      await createAuditLog(tx, {
-        caseId: input.caseId,
-        userId: input.actorUserId,
-        action: "MANUAL_OVERRIDE_BLOCKED_NO_AVAILABILITY_OVERLAP",
-        details: {
-          specialistId: input.specialistId,
-          durationMinutes,
-          participantsSubmitted: caseAvailability.participantsSubmitted,
-          requiredParticipants: caseAvailability.requiredParticipants,
-          reason: caseAvailability.reason,
+    let overlapWindowCount: number | null = null;
+    let availableSlots: Date[] = [];
+
+    if (assignmentMode === "auto") {
+      const caseAvailability = computeCaseAvailability(caseRecord, durationMinutes);
+      if (!caseAvailability.hasOverlap) {
+        await createAuditLog(tx, {
+          caseId: input.caseId,
+          userId: input.actorUserId,
+          action: "MANUAL_OVERRIDE_BLOCKED_NO_AVAILABILITY_OVERLAP",
+          details: {
+            specialistId: input.specialistId,
+            durationMinutes,
+            participantsSubmitted: caseAvailability.participantsSubmitted,
+            requiredParticipants: caseAvailability.requiredParticipants,
+            reason: caseAvailability.reason,
+          },
+        });
+
+        throw new DomainError(caseAvailability.reason || "Case not eligible for scheduling", 409);
+      }
+
+      overlapWindowCount = caseAvailability.windows.length;
+      availableSlots = await schedulingProvider.getAvailableSlots(
+        specialist.id,
+        eventType,
+        durationMinutes,
+      );
+
+      const earliestSlot = availableSlots.find((slot) =>
+        slotFitsAvailability(slot, durationMinutes, caseAvailability.windows),
+      );
+      if (!earliestSlot) {
+        throw new DomainError(
+          `No provider slots for counsellor ${specialist.name} fit the submitted client availability windows.`,
+          409,
+        );
+      }
+
+      const attendee = getPrimaryAttendee(caseRecord);
+
+      const bookingCaseData: SchedulingCaseData = {
+        caseId: caseRecord.id,
+        caseReference: caseRecord.reference,
+        participantCount,
+        attendeeName: attendee.attendeeName,
+        attendeeEmail: attendee.attendeeEmail,
+        eventType,
+        durationMinutes,
+      };
+
+      const booking = await schedulingProvider.createBooking(
+        specialist.id,
+        earliestSlot,
+        bookingCaseData,
+      );
+
+      const activeSession = caseRecord.sessions[0] ?? null;
+      if (activeSession?.providerBookingId) {
+        await schedulingProvider.cancelBooking(activeSession.providerBookingId);
+      }
+
+      const session = activeSession
+        ? await tx.session.update({
+            where: {
+              id: activeSession.id,
+            },
+            data: {
+              specialistId: input.specialistId,
+              status: SessionStatus.SCHEDULED,
+              providerBookingId: booking.bookingId,
+              providerStartTime: booking.startTime,
+              providerEndTime: booking.endTime,
+              providerType: booking.providerType,
+              providerStatus: "scheduled",
+              lastProviderSyncAt: new Date(),
+            },
+          })
+        : await tx.session.create({
+            data: {
+              caseId: input.caseId,
+              specialistId: input.specialistId,
+              status: SessionStatus.SCHEDULED,
+              providerBookingId: booking.bookingId,
+              providerStartTime: booking.startTime,
+              providerEndTime: booking.endTime,
+              providerType: booking.providerType,
+              providerStatus: "scheduled",
+              lastProviderSyncAt: new Date(),
+            },
+          });
+
+      const targetStatus = CaseStatus.SCHEDULED;
+
+      await tx.case.update({
+        where: { id: input.caseId },
+        data: {
+          assignedSpecialistId: input.specialistId,
+          manualOverride: true,
+          status: targetStatus,
         },
       });
 
-      throw new DomainError(caseAvailability.reason || "Case not eligible for scheduling", 409);
+      await sendSchedulingDocuments(tx, input.caseId, session.id);
+
+      if (targetStatus !== caseRecord.status) {
+        await createAuditLog(tx, {
+          caseId: input.caseId,
+          userId: input.actorUserId,
+          action: "CASE_STATUS_TRANSITION",
+          details: {
+            from: caseRecord.status,
+            to: targetStatus,
+            reason: "Manual override progression",
+          },
+        });
+      }
+
+      await createAuditLog(tx, {
+        caseId: input.caseId,
+        userId: input.actorUserId,
+        action: "MANUAL_OVERRIDE",
+        details: {
+          assignmentMode,
+          previousSessionId: activeSession?.id ?? null,
+          previousProviderBookingId: activeSession?.providerBookingId ?? null,
+          specialistId: input.specialistId,
+          providerType: booking.providerType,
+          providerBookingId: booking.bookingId,
+          providerStartTime: booking.startTime.toISOString(),
+          providerEndTime: booking.endTime.toISOString(),
+          eventType,
+          durationMinutes,
+          reason: input.reason,
+          matchingRuleOverride: input.matchingRuleOverride ?? null,
+          overlapWindowCount,
+        },
+      });
+
+      return tx.case.findUnique({
+        where: { id: input.caseId },
+        include: {
+          assignedSpecialist: true,
+          sessions: {
+            include: {
+              specialist: true,
+            },
+            orderBy: {
+              providerStartTime: "asc",
+            },
+          },
+        },
+      });
     }
 
-    const availableSlots = await schedulingProvider.getAvailableSlots(
+    availableSlots = await schedulingProvider.getAvailableSlots(
       specialist.id,
       eventType,
       durationMinutes,
     );
 
-    const earliestSlot = availableSlots.find((slot) =>
-      slotFitsAvailability(slot, durationMinutes, caseAvailability.windows),
-    );
-
-    if (!earliestSlot) {
+    const exactPreferredSlot = preferredStartTime
+      ? availableSlots.find((slot) => slot.getTime() === preferredStartTime.getTime()) || null
+      : null;
+    if (preferredStartTime && !exactPreferredSlot) {
       throw new DomainError(
-        `No provider slots for specialist ${specialist.name} fit the submitted client availability windows.`,
+        `The selected ${durationMinutes}-minute slot is no longer available for counsellor ${specialist.name}.`,
         409,
       );
     }
-    const attendee = getPrimaryAttendee(caseRecord);
 
+    const preferredSlots = availableSlots.filter((slot) =>
+      slotMatchesAnyManualTimeBlock(slot, manualTargetBlocks),
+    );
+    const earliestPreferredSlot = exactPreferredSlot || preferredSlots[0];
+    if (!earliestPreferredSlot) {
+      throw new DomainError(
+        `No 60-minute slots between 09:00 and 18:00 match the selected manual availability block(s) for counsellor ${specialist.name}.`,
+        409,
+      );
+    }
+
+    const attendee = getPrimaryAttendee(caseRecord);
     const bookingCaseData: SchedulingCaseData = {
       caseId: caseRecord.id,
       caseReference: caseRecord.reference,
@@ -1369,10 +1798,9 @@ export async function overrideCaseAssignment(input: {
       eventType,
       durationMinutes,
     };
-
     const booking = await schedulingProvider.createBooking(
       specialist.id,
-      earliestSlot,
+      earliestPreferredSlot,
       bookingCaseData,
     );
 
@@ -1432,7 +1860,7 @@ export async function overrideCaseAssignment(input: {
         details: {
           from: caseRecord.status,
           to: targetStatus,
-          reason: "Manual override progression",
+          reason: "Manual assignment progression",
         },
       });
     }
@@ -1442,6 +1870,7 @@ export async function overrideCaseAssignment(input: {
       userId: input.actorUserId,
       action: "MANUAL_OVERRIDE",
       details: {
+        assignmentMode,
         previousSessionId: activeSession?.id ?? null,
         previousProviderBookingId: activeSession?.providerBookingId ?? null,
         specialistId: input.specialistId,
@@ -1451,9 +1880,130 @@ export async function overrideCaseAssignment(input: {
         providerEndTime: booking.endTime.toISOString(),
         eventType,
         durationMinutes,
+        requestedDurationMinutes,
         reason: input.reason,
         matchingRuleOverride: input.matchingRuleOverride ?? null,
-        overlapWindowCount: caseAvailability.windows.length,
+        selectedTimePreferences: intakeTimePreferences,
+        preferredTimeBlock: preferredStartTimeBlock ?? preferredTimeBlock ?? null,
+        preferredStartTime: preferredStartTime ? preferredStartTime.toISOString() : null,
+        manualTargetBlocks,
+        manualAssignmentPolicy: {
+          slotMinutes: MANUAL_ASSIGNMENT_SLOT_MINUTES,
+          dayStartHour: MANUAL_ASSIGNMENT_DAY_START_HOUR,
+          dayEndHour: MANUAL_ASSIGNMENT_DAY_END_HOUR,
+        },
+        overlapWindowCount,
+      },
+    });
+
+    return tx.case.findUnique({
+      where: { id: input.caseId },
+      include: {
+        assignedSpecialist: true,
+        sessions: {
+          include: {
+            specialist: true,
+          },
+          orderBy: {
+            providerStartTime: "asc",
+          },
+        },
+      },
+    });
+  });
+}
+
+export async function unassignCaseAssignment(input: {
+  caseId: string;
+  reason: string;
+  actorUserId: string;
+}) {
+  return db.$transaction(async (tx) => {
+    const schedulingProvider = await createSchedulingProvider(tx);
+    const caseRecord = await tx.case.findUnique({
+      where: {
+        id: input.caseId,
+      },
+      include: {
+        sessions: {
+          where: {
+            status: {
+              in: ACTIVE_SESSION_STATUSES,
+            },
+          },
+          orderBy: {
+            providerStartTime: "desc",
+          },
+        },
+      },
+    });
+
+    if (!caseRecord) {
+      throw new DomainError("Case not found.", 404);
+    }
+
+    if (caseRecord.status === CaseStatus.CLOSED) {
+      throw new DomainError("Cannot unassign a closed case.", 409);
+    }
+
+    const activeSession = caseRecord.sessions[0] ?? null;
+    if (!caseRecord.assignedSpecialistId && !activeSession) {
+      throw new DomainError("Case is already unassigned.", 409);
+    }
+
+    if (activeSession?.providerBookingId) {
+      await schedulingProvider.cancelBooking(activeSession.providerBookingId);
+
+      await tx.session.update({
+        where: {
+          id: activeSession.id,
+        },
+        data: {
+          status: SessionStatus.CANCELLED,
+          providerStatus: "cancelled",
+          lastProviderSyncAt: new Date(),
+        },
+      });
+    }
+
+    const targetStatus =
+      caseRecord.status === CaseStatus.SCHEDULED || caseRecord.status === CaseStatus.IN_SESSION
+        ? CaseStatus.READY_TO_SCHEDULE
+        : caseRecord.status;
+
+    await tx.case.update({
+      where: {
+        id: input.caseId,
+      },
+      data: {
+        assignedSpecialistId: null,
+        manualOverride: true,
+        status: targetStatus,
+      },
+    });
+
+    if (targetStatus !== caseRecord.status) {
+      await createAuditLog(tx, {
+        caseId: input.caseId,
+        userId: input.actorUserId,
+        action: "CASE_STATUS_TRANSITION",
+        details: {
+          from: caseRecord.status,
+          to: targetStatus,
+          reason: "Manual unassignment progression",
+        },
+      });
+    }
+
+    await createAuditLog(tx, {
+      caseId: input.caseId,
+      userId: input.actorUserId,
+      action: "MANUAL_UNASSIGN",
+      details: {
+        previousSpecialistId: caseRecord.assignedSpecialistId,
+        previousSessionId: activeSession?.id ?? null,
+        previousProviderBookingId: activeSession?.providerBookingId ?? null,
+        reason: input.reason,
       },
     });
 
@@ -1596,11 +2146,25 @@ export async function completeDocumentInstance(documentId: string, actorUserId?:
 
 export async function listCasesForOps() {
   return db.case.findMany({
-    include: {
-      caseWorkflowTemplate: true,
+    select: {
+      id: true,
+      reference: true,
+      status: true,
+      caseWorkflowTemplate: {
+        select: {
+          id: true,
+          name: true,
+          counsellingType: true,
+        },
+      },
       participants: {
-        include: {
-          client: true,
+        select: {
+          client: {
+            select: {
+              firstName: true,
+              lastName: true,
+            },
+          },
         },
       },
       workflowStates: {
@@ -1611,24 +2175,37 @@ export async function listCasesForOps() {
             required: true,
           },
         },
-        include: {
-          step: true,
+        select: {
+          id: true,
         },
       },
-      assignedSpecialist: true,
+      assignedSpecialist: {
+        select: {
+          name: true,
+        },
+      },
       sessions: {
         where: {
           status: {
             in: ACTIVE_SESSION_STATUSES,
           },
+          providerStatus: "scheduled",
         },
         orderBy: {
           providerStartTime: "asc",
         },
+        take: 1,
+        select: {
+          providerStartTime: true,
+        },
       },
       documents: {
-        include: {
-          template: true,
+        where: {
+          required: true,
+        },
+        select: {
+          required: true,
+          status: true,
         },
       },
     },
@@ -1640,9 +2217,14 @@ export async function listCasesForOps() {
 
 export async function listClientsForOps() {
   return db.client.findMany({
-    include: {
+    select: {
+      id: true,
+      firstName: true,
+      lastName: true,
+      email: true,
+      phone: true,
       participants: {
-        include: {
+        select: {
           case: {
             select: {
               id: true,
@@ -1694,14 +2276,19 @@ export async function listClientsForSpecialist(specialistId: string) {
         },
       },
     },
-    include: {
+    select: {
+      id: true,
+      firstName: true,
+      lastName: true,
+      email: true,
+      phone: true,
       participants: {
         where: {
           case: {
             assignedSpecialistId: specialistId,
           },
         },
-        include: {
+        select: {
           case: {
             select: {
               id: true,
@@ -1710,10 +2297,15 @@ export async function listClientsForSpecialist(specialistId: string) {
               sessions: {
                 where: {
                   specialistId,
+                  status: {
+                    in: ACTIVE_SESSION_STATUSES,
+                  },
+                  providerStatus: "scheduled",
                 },
                 orderBy: {
                   providerStartTime: "asc",
                 },
+                take: 1,
                 select: {
                   id: true,
                   providerStartTime: true,
@@ -1820,12 +2412,31 @@ export async function getCaseDetails(caseId: string) {
 
 export async function listSpecialistsForOps() {
   return db.specialist.findMany({
-    include: {
+    select: {
+      id: true,
+      name: true,
+      email: true,
+      calUserId: true,
+      supportsCouples: true,
+      calIndividualEventTypeId: true,
+      calCouplesEventTypeId: true,
+      capabilities: true,
       sessions: {
         where: {
+          status: {
+            in: ACTIVE_SESSION_STATUSES,
+          },
+          providerStatus: "scheduled",
           providerStartTime: {
             gte: new Date(),
           },
+        },
+        orderBy: {
+          providerStartTime: "asc",
+        },
+        take: 1,
+        select: {
+          providerStartTime: true,
         },
       },
     },
@@ -1835,7 +2446,309 @@ export async function listSpecialistsForOps() {
   });
 }
 
+export async function getManualAssignmentDashboard() {
+  const operationalSettings = await getOperationalSettings();
+  const assignmentMode = operationalSettings.schedulingAssignmentMode;
+
+  const [unassignedCases, assignedCases, specialists] = await Promise.all([
+    db.case.findMany({
+      where: {
+        assignedSpecialistId: null,
+        status: {
+          in: [
+            CaseStatus.NEW,
+            CaseStatus.AWAITING_REVIEW,
+            CaseStatus.MATCHED,
+            CaseStatus.AGREEMENT_PENDING,
+            CaseStatus.READY_TO_SCHEDULE,
+          ],
+        },
+        sessions: {
+          none: {
+            status: {
+              in: ACTIVE_SESSION_STATUSES,
+            },
+          },
+        },
+      },
+      select: {
+        id: true,
+        reference: true,
+        status: true,
+        counsellingType: true,
+        intakeFormData: true,
+        participants: {
+          select: {
+            client: {
+              select: {
+                id: true,
+                firstName: true,
+                lastName: true,
+              },
+            },
+          },
+        },
+        workflowStates: {
+          where: {
+            status: "PENDING",
+            step: {
+              blocksScheduling: true,
+              required: true,
+            },
+          },
+          select: {
+            step: {
+              select: {
+                name: true,
+              },
+            },
+          },
+        },
+      },
+      orderBy: {
+        createdAt: "asc",
+      },
+    }),
+    db.case.findMany({
+      where: {
+        assignedSpecialistId: {
+          not: null,
+        },
+        status: {
+          in: [
+            CaseStatus.MATCHED,
+            CaseStatus.AGREEMENT_PENDING,
+            CaseStatus.READY_TO_SCHEDULE,
+            CaseStatus.SCHEDULED,
+          ],
+        },
+      },
+      select: {
+        id: true,
+        reference: true,
+        status: true,
+        counsellingType: true,
+        intakeFormData: true,
+        assignedSpecialistId: true,
+        participants: {
+          select: {
+            client: {
+              select: {
+                id: true,
+                firstName: true,
+                lastName: true,
+              },
+            },
+          },
+        },
+        workflowStates: {
+          where: {
+            status: "PENDING",
+            step: {
+              blocksScheduling: true,
+              required: true,
+            },
+          },
+          select: {
+            step: {
+              select: {
+                name: true,
+              },
+            },
+          },
+        },
+        sessions: {
+          where: {
+            status: {
+              in: ACTIVE_SESSION_STATUSES,
+            },
+            providerStatus: "scheduled",
+          },
+          orderBy: {
+            providerStartTime: "asc",
+          },
+          take: 1,
+          select: {
+            providerStartTime: true,
+          },
+        },
+      },
+      orderBy: {
+        updatedAt: "desc",
+      },
+    }),
+    db.specialist.findMany({
+      where: {
+        active: true,
+      },
+      select: {
+        id: true,
+        name: true,
+        supportsCouples: true,
+      },
+      orderBy: {
+        name: "asc",
+      },
+    }),
+  ]);
+
+  let providerError: string | null = null;
+  const availabilityBySpecialist = new Map<
+    string,
+    {
+      counts: Record<ManualAssignmentTimeBlock, number>;
+      next: Partial<Record<ManualAssignmentTimeBlock, Date>>;
+      slotPreview: Record<ManualAssignmentTimeBlock, Date[]>;
+      calendarSlots: Date[];
+    }
+  >();
+
+  if (assignmentMode === "manual") {
+    try {
+      const schedulingProvider = await createSchedulingProvider(db);
+      const results = await Promise.all(
+        specialists.map(async (specialist) => {
+          const slots = await schedulingProvider.getAvailableSlots(
+            specialist.id,
+            "individual",
+            MANUAL_ASSIGNMENT_SLOT_MINUTES,
+          );
+          const manualSlots = slots.filter((slot) => slotIsOnManualAssignmentGrid(slot));
+          const slotsByBlock: Record<ManualAssignmentTimeBlock, Date[]> = {
+            MORNING: manualSlots.filter((slot) => slotMatchesManualTimeBlock(slot, "MORNING")),
+            AFTERNOON: manualSlots.filter((slot) => slotMatchesManualTimeBlock(slot, "AFTERNOON")),
+            EVENING: manualSlots.filter((slot) => slotMatchesManualTimeBlock(slot, "EVENING")),
+          };
+          const counts: Record<ManualAssignmentTimeBlock, number> = {
+            MORNING: slotsByBlock.MORNING.length,
+            AFTERNOON: slotsByBlock.AFTERNOON.length,
+            EVENING: slotsByBlock.EVENING.length,
+          };
+
+          const next: Partial<Record<ManualAssignmentTimeBlock, Date>> = {
+            MORNING: slotsByBlock.MORNING[0],
+            AFTERNOON: slotsByBlock.AFTERNOON[0],
+            EVENING: slotsByBlock.EVENING[0],
+          };
+
+          const slotPreview: Record<ManualAssignmentTimeBlock, Date[]> = {
+            MORNING: slotsByBlock.MORNING.slice(0, 8),
+            AFTERNOON: slotsByBlock.AFTERNOON.slice(0, 8),
+            EVENING: slotsByBlock.EVENING.slice(0, 8),
+          };
+          const calendarSlots = manualSlots.slice(0, 140);
+
+          return {
+            specialistId: specialist.id,
+            counts,
+            next,
+            slotPreview,
+            calendarSlots,
+          };
+        }),
+      );
+
+      for (const result of results) {
+        availabilityBySpecialist.set(result.specialistId, {
+          counts: result.counts,
+          next: result.next,
+          slotPreview: result.slotPreview,
+          calendarSlots: result.calendarSlots,
+        });
+      }
+    } catch (error) {
+      providerError =
+        error instanceof Error
+          ? error.message
+          : "Unable to load provider availability for manual assignment dashboard.";
+    }
+  }
+
+  const specialistIdSet = new Set(specialists.map((specialist) => specialist.id));
+  const assignedCasesForBoard = assignedCases
+    .filter(
+      (
+        caseItem,
+      ): caseItem is typeof caseItem & {
+        assignedSpecialistId: string;
+      } => {
+        const specialistId = caseItem.assignedSpecialistId;
+        return typeof specialistId === "string" && specialistIdSet.has(specialistId);
+      },
+    )
+    .map((caseItem) => {
+      const boardCase = mapCaseToManualAssignmentBoardCase(caseItem);
+      const sessionStart = caseItem.sessions[0]?.providerStartTime || null;
+      const blockFromSession = resolveManualAssignmentTimeBlockForSlot(sessionStart);
+
+      return {
+        ...boardCase,
+        assignedSpecialistId: caseItem.assignedSpecialistId,
+        assignedTimeBlock: blockFromSession || boardCase.timePreferences[0] || "MORNING",
+        assignedSlotStartTime: sessionStart ? sessionStart.toISOString() : null,
+      };
+    });
+
+  return {
+    assignmentMode,
+    schedulingEngineType: operationalSettings.schedulingEngineType,
+    slotPolicy: {
+      startHour: MANUAL_ASSIGNMENT_DAY_START_HOUR,
+      endHour: MANUAL_ASSIGNMENT_DAY_END_HOUR,
+      slotMinutes: MANUAL_ASSIGNMENT_SLOT_MINUTES,
+    },
+    providerError,
+    unassignedCases: unassignedCases.map(mapCaseToManualAssignmentBoardCase),
+    assignedCases: assignedCasesForBoard,
+    specialists: specialists.map((specialist) => {
+      const availability = availabilityBySpecialist.get(specialist.id);
+      const next = availability?.next || {};
+      const slotPreview = availability?.slotPreview;
+      const calendarSlots = availability?.calendarSlots;
+      return {
+        id: specialist.id,
+        name: specialist.name,
+        supportsCouples: specialist.supportsCouples,
+        availability: availability
+          ? {
+              counts: availability.counts,
+              next: {
+                MORNING: next.MORNING ? next.MORNING.toISOString() : null,
+                AFTERNOON: next.AFTERNOON ? next.AFTERNOON.toISOString() : null,
+                EVENING: next.EVENING ? next.EVENING.toISOString() : null,
+              },
+              slots: {
+                MORNING: (slotPreview?.MORNING || []).map((slot) => slot.toISOString()),
+                AFTERNOON: (slotPreview?.AFTERNOON || []).map((slot) => slot.toISOString()),
+                EVENING: (slotPreview?.EVENING || []).map((slot) => slot.toISOString()),
+              },
+              calendarSlots: (calendarSlots || []).map((slot) => slot.toISOString()),
+            }
+          : {
+          counts: {
+            MORNING: 0,
+            AFTERNOON: 0,
+            EVENING: 0,
+          },
+          next: {
+            MORNING: null,
+            AFTERNOON: null,
+            EVENING: null,
+          },
+          slots: {
+            MORNING: [],
+            AFTERNOON: [],
+            EVENING: [],
+          },
+          calendarSlots: [],
+        },
+      };
+    }),
+  };
+}
+
 export async function getCaseSpecialistAvailability(caseId: string) {
+  const assignmentMode = await getSchedulingAssignmentMode();
   const caseRecord = await db.case.findUnique({
     where: {
       id: caseId,
@@ -1865,18 +2778,37 @@ export async function getCaseSpecialistAvailability(caseId: string) {
   const supportsCouplesRequired = participantCount === 2;
   const durationMinutes =
     participantCount > 0
-      ? resolveSessionDurationMinutes(caseRecord.flags, participantCount)
+      ? assignmentMode === "manual"
+        ? MANUAL_ASSIGNMENT_SLOT_MINUTES
+        : await resolveSessionDurationMinutes(caseRecord.flags, participantCount)
       : 0;
+  const intakeTimePreferences = extractIntakeTimePreferencesFromCase(caseRecord);
+  const manualTargetBlocks =
+    intakeTimePreferences.length > 0 ? intakeTimePreferences : INTAKE_TIME_PREFERENCES;
   const clientAvailability =
-    participantCount > 0
-      ? computeCaseAvailability(caseRecord, durationMinutes)
+    assignmentMode === "auto"
+      ? participantCount > 0
+        ? computeCaseAvailability(caseRecord, durationMinutes)
+        : {
+            windows: [],
+            participantsSubmitted: 0,
+            requiredParticipants: 0,
+            participantIdentifiersSubmitted: [],
+            hasOverlap: false,
+            reason: "Case has no participants.",
+          }
       : {
-          windows: [],
-          participantsSubmitted: 0,
-          requiredParticipants: 0,
-          participantIdentifiersSubmitted: [],
-          hasOverlap: false,
-          reason: "Case has no participants.",
+          windows: [] as AvailabilityRange[],
+          participantsSubmitted: caseRecord.participants.length,
+          requiredParticipants: caseRecord.participants.length,
+          participantIdentifiersSubmitted: caseRecord.participants.map((participant) =>
+            normalizeParticipantIdentifier(participant.client.email),
+          ),
+          hasOverlap: true,
+          reason:
+            intakeTimePreferences.length === 0
+              ? "No time-of-day preference submitted. Showing earliest provider slots."
+              : null,
         };
 
   const specialists = await db.specialist.findMany({
@@ -1896,6 +2828,7 @@ export async function getCaseSpecialistAvailability(caseId: string) {
 
   if (participantCount === 0 || specialists.length === 0) {
     return {
+      assignmentMode,
       participantCount,
       durationMinutes,
       requiresCouplesSupport: supportsCouplesRequired,
@@ -1905,12 +2838,13 @@ export async function getCaseSpecialistAvailability(caseId: string) {
         hasOverlap: clientAvailability.hasOverlap,
         reason: clientAvailability.reason,
         overlapWindowCount: clientAvailability.windows.length,
+        timePreferences: intakeTimePreferences,
       },
       specialists: [],
     };
   }
 
-  const schedulingProvider = createSchedulingProvider(db);
+  const schedulingProvider = await createSchedulingProvider(db);
   const availabilityBySpecialist = await Promise.all(
     specialists.map(async (specialist) => {
       const eventType = resolveSchedulingEventType(specialist, participantCount);
@@ -1923,11 +2857,16 @@ export async function getCaseSpecialistAvailability(caseId: string) {
         );
 
         const nextProviderSlot = slots[0] ?? null;
-        const nextClientMatchedSlot = clientAvailability.hasOverlap
-          ? slots.find((slot) =>
-              slotFitsAvailability(slot, durationMinutes, clientAvailability.windows),
-            ) || null
-          : null;
+        const nextClientMatchedSlot =
+          assignmentMode === "auto"
+            ? clientAvailability.hasOverlap
+              ? slots.find((slot) =>
+                  slotFitsAvailability(slot, durationMinutes, clientAvailability.windows),
+                ) || null
+              : null
+            : slots.find((slot) =>
+                slotMatchesAnyManualTimeBlock(slot, manualTargetBlocks),
+              ) || null;
 
         return {
           specialistId: specialist.id,
@@ -1958,6 +2897,7 @@ export async function getCaseSpecialistAvailability(caseId: string) {
   );
 
   return {
+    assignmentMode,
     participantCount,
     durationMinutes,
     requiresCouplesSupport: supportsCouplesRequired,
@@ -1968,6 +2908,7 @@ export async function getCaseSpecialistAvailability(caseId: string) {
       reason: clientAvailability.reason,
       overlapWindowCount: clientAvailability.windows.length,
       participantIdentifiersSubmitted: clientAvailability.participantIdentifiersSubmitted,
+      timePreferences: intakeTimePreferences,
     },
     specialists: availabilityBySpecialist.sort((first, second) => {
       if (first.specialistId === caseRecord.assignedSpecialistId) {
@@ -2034,6 +2975,634 @@ export async function getSpecialistProfileForOps(specialistId: string) {
   });
 }
 
+export async function getSpecialistAvailabilityCalendar(
+  specialistId: string,
+  dayCount?: number,
+  startDate?: Date | string,
+) {
+  const days = normalizeGridDayCount(dayCount);
+  const rangeStart = normalizeGridStartDate(startDate);
+  const rangeEnd = addDays(rangeStart, days);
+
+  const specialist = await db.specialist.findUnique({
+    where: {
+      id: specialistId,
+    },
+    select: {
+      id: true,
+      name: true,
+      active: true,
+    },
+  });
+
+  if (!specialist) {
+    throw new DomainError("Counsellor not found.", 404);
+  }
+
+  const [availabilityWindows, sessions] = await Promise.all([
+    db.specialistAvailabilityWindow.findMany({
+      where: {
+        specialistId,
+        active: true,
+        startTime: {
+          lt: rangeEnd,
+        },
+        endTime: {
+          gt: rangeStart,
+        },
+      },
+      orderBy: {
+        startTime: "asc",
+      },
+      select: {
+        id: true,
+        startTime: true,
+        endTime: true,
+        timezone: true,
+        availabilityType: true,
+      },
+    }),
+    db.session.findMany({
+      where: {
+        specialistId,
+        status: {
+          in: ACTIVE_SESSION_STATUSES,
+        },
+        providerStatus: "scheduled",
+        providerStartTime: {
+          gte: rangeStart,
+          lt: rangeEnd,
+        },
+      },
+      select: {
+        id: true,
+        providerStartTime: true,
+        providerEndTime: true,
+        case: {
+          select: {
+            reference: true,
+          },
+        },
+      },
+      orderBy: {
+        providerStartTime: "asc",
+      },
+    }),
+  ]);
+
+  return {
+    specialist,
+    dayCount: days,
+    rangeStart: rangeStart.toISOString(),
+    rangeEnd: rangeEnd.toISOString(),
+    slotPolicy: {
+      startHour: MANUAL_ASSIGNMENT_DAY_START_HOUR,
+      endHour: MANUAL_ASSIGNMENT_DAY_END_HOUR,
+      slotMinutes: MANUAL_ASSIGNMENT_SLOT_MINUTES,
+    },
+    windows: availabilityWindows.map((window) => ({
+      id: window.id,
+      startTime: window.startTime.toISOString(),
+      endTime: window.endTime.toISOString(),
+      timezone: window.timezone,
+      availabilityType: window.availabilityType,
+    })),
+    sessions: sessions.map((session) => ({
+      id: session.id,
+      startTime: session.providerStartTime.toISOString(),
+      endTime: session.providerEndTime.toISOString(),
+      caseReference: session.case.reference,
+    })),
+  };
+}
+
+export async function addSpecialistAvailabilitySlot(input: {
+  specialistId: string;
+  startTime: Date | string;
+  endTime: Date | string;
+  timezone?: string;
+  availabilityType?: SpecialistAvailabilityType | string;
+  notes?: string;
+  actorUserId: string;
+  source?: string;
+}) {
+  const startTime = parseAvailabilityDate(input.startTime, "startTime");
+  const endTime = parseAvailabilityDate(input.endTime, "endTime");
+
+  if (endTime <= startTime) {
+    throw new DomainError("Availability end time must be after start time.", 400);
+  }
+
+  const durationMinutes = Math.round((endTime.getTime() - startTime.getTime()) / 60_000);
+  if (durationMinutes !== MANUAL_ASSIGNMENT_SLOT_MINUTES) {
+    throw new DomainError(
+      `Availability slots must be ${MANUAL_ASSIGNMENT_SLOT_MINUTES} minutes.`,
+      409,
+    );
+  }
+
+  if (startTime.getMinutes() !== 0 || endTime.getMinutes() !== 0) {
+    throw new DomainError("Availability slots must start and end on the hour.", 409);
+  }
+
+  const startHour = startTime.getHours();
+  const endHour = endTime.getHours();
+  if (
+    startHour < MANUAL_ASSIGNMENT_DAY_START_HOUR ||
+    endHour > MANUAL_ASSIGNMENT_DAY_END_HOUR
+  ) {
+    throw new DomainError(
+      `Availability slots must be between ${String(MANUAL_ASSIGNMENT_DAY_START_HOUR).padStart(2, "0")}:00 and ${String(MANUAL_ASSIGNMENT_DAY_END_HOUR).padStart(2, "0")}:00.`,
+      409,
+    );
+  }
+
+  const availabilityType =
+    normalizeSpecialistAvailabilityType(input.availabilityType) || "AVAILABLE";
+
+  const specialist = await db.specialist.findUnique({
+    where: {
+      id: input.specialistId,
+    },
+    select: {
+      id: true,
+      name: true,
+    },
+  });
+
+  if (!specialist) {
+    throw new DomainError("Counsellor not found.", 404);
+  }
+
+  const overlappingSession = await db.session.findFirst({
+    where: {
+      specialistId: input.specialistId,
+      status: {
+        in: ACTIVE_SESSION_STATUSES,
+      },
+      providerStatus: "scheduled",
+      providerStartTime: {
+        lt: endTime,
+      },
+      providerEndTime: {
+        gt: startTime,
+      },
+    },
+    select: {
+      case: {
+        select: {
+          reference: true,
+        },
+      },
+    },
+  });
+  if (overlappingSession) {
+    throw new DomainError(
+      `Cannot update this slot because it is already booked for ${overlappingSession.case.reference}.`,
+      409,
+    );
+  }
+
+  return db.$transaction(async (tx) => {
+    const exact = await tx.specialistAvailabilityWindow.findFirst({
+      where: {
+        specialistId: input.specialistId,
+        active: true,
+        startTime,
+        endTime,
+        availabilityType,
+      },
+      select: {
+        id: true,
+        specialistId: true,
+        startTime: true,
+        endTime: true,
+        timezone: true,
+        availabilityType: true,
+      },
+    });
+
+    if (exact) {
+      return exact;
+    }
+
+    const overlaps = await tx.specialistAvailabilityWindow.findMany({
+      where: {
+        specialistId: input.specialistId,
+        active: true,
+        startTime: {
+          lt: endTime,
+        },
+        endTime: {
+          gt: startTime,
+        },
+      },
+      select: {
+        id: true,
+        availabilityType: true,
+      },
+    });
+
+    const sameTypeConflict = overlaps.some((window) => window.availabilityType === availabilityType);
+    if (sameTypeConflict) {
+      throw new DomainError(
+        `This slot is already marked as ${specialistAvailabilityTypeLabel(availabilityType)}.`,
+        409,
+      );
+    }
+
+    const oppositeTypeOverlaps = overlaps.filter((window) => window.availabilityType !== availabilityType);
+    if (oppositeTypeOverlaps.length > 0) {
+      await tx.specialistAvailabilityWindow.updateMany({
+        where: {
+          id: {
+            in: oppositeTypeOverlaps.map((window) => window.id),
+          },
+        },
+        data: {
+          active: false,
+        },
+      });
+    }
+
+    const created = await tx.specialistAvailabilityWindow.create({
+      data: {
+        specialistId: input.specialistId,
+        startTime,
+        endTime,
+        timezone: input.timezone?.trim() || "Europe/London",
+        availabilityType,
+        notes: input.notes?.trim() || null,
+        source: input.source?.trim() || "manual_calendar",
+        createdByUserId: input.actorUserId,
+      },
+      select: {
+        id: true,
+        specialistId: true,
+        startTime: true,
+        endTime: true,
+        timezone: true,
+        availabilityType: true,
+      },
+    });
+
+    await tx.auditLog.create({
+      data: {
+        userId: input.actorUserId,
+        action: "SPECIALIST_AVAILABILITY_SLOT_ADDED",
+        details: {
+          specialistId: specialist.id,
+          specialistName: specialist.name,
+          availabilityWindowId: created.id,
+          startTime: created.startTime.toISOString(),
+          endTime: created.endTime.toISOString(),
+          timezone: created.timezone,
+          availabilityType,
+          replacedWindowIds: oppositeTypeOverlaps.map((window) => window.id),
+          source: input.source?.trim() || "manual_calendar",
+        },
+      },
+    });
+
+    return created;
+  });
+}
+
+export async function addSpecialistAvailabilityPresetBatch(input: {
+  specialistId: string;
+  startDate: Date | string;
+  endDate: Date | string;
+  blocks: ManualAssignmentTimeBlock[];
+  availabilityType?: SpecialistAvailabilityType | string;
+  actorUserId: string;
+  timezone?: string;
+  source?: string;
+}) {
+  const startDate = parseAvailabilityDate(input.startDate, "startDate");
+  const endDate = parseAvailabilityDate(input.endDate, "endDate");
+  startDate.setHours(0, 0, 0, 0);
+  endDate.setHours(0, 0, 0, 0);
+
+  if (endDate < startDate) {
+    throw new DomainError("Preset end date must be on or after start date.", 400);
+  }
+
+  const rangeDays = Math.round((endDate.getTime() - startDate.getTime()) / 86_400_000) + 1;
+  if (rangeDays > MAX_SPECIALIST_AVAILABILITY_GRID_DAYS) {
+    throw new DomainError(
+      `Preset range cannot exceed ${MAX_SPECIALIST_AVAILABILITY_GRID_DAYS} days.`,
+      409,
+    );
+  }
+
+  const normalizedBlocks = Array.from(
+    new Set(
+      input.blocks
+        .map((value) => normalizeIntakeTimePreference(value))
+        .filter((value): value is ManualAssignmentTimeBlock => Boolean(value)),
+    ),
+  );
+  if (normalizedBlocks.length === 0) {
+    throw new DomainError("At least one preset block is required.", 400);
+  }
+
+  const availabilityType =
+    normalizeSpecialistAvailabilityType(input.availabilityType) || "AVAILABLE";
+
+  const specialist = await db.specialist.findUnique({
+    where: {
+      id: input.specialistId,
+    },
+    select: {
+      id: true,
+      name: true,
+    },
+  });
+  if (!specialist) {
+    throw new DomainError("Counsellor not found.", 404);
+  }
+
+  const queryRangeEnd = addDays(endDate, 1);
+
+  const [existingWindows, bookedSessions] = await Promise.all([
+    db.specialistAvailabilityWindow.findMany({
+      where: {
+        specialistId: input.specialistId,
+        active: true,
+        startTime: {
+          lt: queryRangeEnd,
+        },
+        endTime: {
+          gt: startDate,
+        },
+      },
+      select: {
+        id: true,
+        startTime: true,
+        endTime: true,
+        availabilityType: true,
+      },
+    }),
+    db.session.findMany({
+      where: {
+        specialistId: input.specialistId,
+        status: {
+          in: ACTIVE_SESSION_STATUSES,
+        },
+        providerStatus: "scheduled",
+        providerStartTime: {
+          gte: startDate,
+          lt: queryRangeEnd,
+        },
+      },
+      select: {
+        providerStartTime: true,
+        providerEndTime: true,
+      },
+    }),
+  ]);
+
+  const existingWindowsExpanded = existingWindows.flatMap((window) => {
+    const slots: Array<{
+      windowId: string;
+      availabilityType: SpecialistAvailabilityType;
+      startTime: Date;
+      endTime: Date;
+    }> = [];
+    for (
+      let cursor = window.startTime.getTime();
+      cursor + MANUAL_ASSIGNMENT_SLOT_MINUTES * 60_000 <= window.endTime.getTime();
+      cursor += MANUAL_ASSIGNMENT_SLOT_MINUTES * 60_000
+    ) {
+      slots.push({
+        windowId: window.id,
+        availabilityType: window.availabilityType,
+        startTime: new Date(cursor),
+        endTime: new Date(cursor + MANUAL_ASSIGNMENT_SLOT_MINUTES * 60_000),
+      });
+    }
+    return slots;
+  });
+
+  const now = new Date();
+  const skipped = {
+    past: 0,
+    booked: 0,
+    overlaps: 0,
+  };
+  const candidateSlots: Array<{ startTime: Date; endTime: Date }> = [];
+  const windowsToDeactivate = new Set<string>();
+
+  for (let dayOffset = 0; dayOffset < rangeDays; dayOffset += 1) {
+    const day = addDays(startDate, dayOffset);
+
+    for (const block of normalizedBlocks) {
+      const window = getManualAssignmentBlockWindow(block);
+      for (
+        let hour = window.startHour;
+        hour + MANUAL_ASSIGNMENT_SLOT_MINUTES / 60 <= window.endHour;
+        hour += MANUAL_ASSIGNMENT_SLOT_MINUTES / 60
+      ) {
+        const slotStart = new Date(day);
+        slotStart.setHours(hour, 0, 0, 0);
+        const slotEnd = addMinutes(slotStart, MANUAL_ASSIGNMENT_SLOT_MINUTES);
+
+        if (slotStart < now) {
+          skipped.past += 1;
+          continue;
+        }
+
+        const overlapsBooked = bookedSessions.some(
+          (session) =>
+            slotStart < session.providerEndTime && slotEnd > session.providerStartTime,
+        );
+        if (overlapsBooked) {
+          skipped.booked += 1;
+          continue;
+        }
+
+        const overlappingExisting = existingWindowsExpanded.filter(
+          (existing) => slotStart < existing.endTime && slotEnd > existing.startTime,
+        );
+        const overlapsSameType = overlappingExisting.some(
+          (existing) => existing.availabilityType === availabilityType,
+        );
+        const overlapsCandidate = candidateSlots.some(
+          (existing) => slotStart < existing.endTime && slotEnd > existing.startTime,
+        );
+        if (overlapsSameType || overlapsCandidate) {
+          skipped.overlaps += 1;
+          continue;
+        }
+
+        for (const existing of overlappingExisting) {
+          if (existing.availabilityType !== availabilityType) {
+            windowsToDeactivate.add(existing.windowId);
+          }
+        }
+
+        candidateSlots.push({
+          startTime: slotStart,
+          endTime: slotEnd,
+        });
+      }
+    }
+  }
+
+  if (candidateSlots.length === 0) {
+    return {
+      specialistId: specialist.id,
+      createdCount: 0,
+      availabilityType,
+      replacedWindowCount: 0,
+      skipped,
+      rangeStart: startDate.toISOString(),
+      rangeEnd: endDate.toISOString(),
+      blocks: normalizedBlocks,
+    };
+  }
+
+  await db.$transaction(async (tx) => {
+    if (windowsToDeactivate.size > 0) {
+      await tx.specialistAvailabilityWindow.updateMany({
+        where: {
+          id: {
+            in: Array.from(windowsToDeactivate),
+          },
+        },
+        data: {
+          active: false,
+        },
+      });
+    }
+
+    await tx.specialistAvailabilityWindow.createMany({
+      data: candidateSlots.map((slot) => ({
+        specialistId: input.specialistId,
+        startTime: slot.startTime,
+        endTime: slot.endTime,
+        timezone: input.timezone?.trim() || "Europe/London",
+        availabilityType,
+        source: input.source?.trim() || "manual_preset",
+        createdByUserId: input.actorUserId,
+      })),
+    });
+
+    await tx.auditLog.create({
+      data: {
+        userId: input.actorUserId,
+        action: "SPECIALIST_AVAILABILITY_PRESET_BATCH_ADDED",
+        details: {
+          specialistId: specialist.id,
+          specialistName: specialist.name,
+          createdCount: candidateSlots.length,
+          skipped,
+          availabilityType,
+          replacedWindowCount: windowsToDeactivate.size,
+          blocks: normalizedBlocks,
+          rangeStart: startDate.toISOString(),
+          rangeEnd: endDate.toISOString(),
+          source: input.source?.trim() || "manual_preset",
+        },
+      },
+    });
+  });
+
+  return {
+    specialistId: specialist.id,
+    createdCount: candidateSlots.length,
+    availabilityType,
+    replacedWindowCount: windowsToDeactivate.size,
+    skipped,
+    rangeStart: startDate.toISOString(),
+    rangeEnd: endDate.toISOString(),
+    blocks: normalizedBlocks,
+  };
+}
+
+export async function removeSpecialistAvailabilitySlot(input: {
+  specialistId: string;
+  availabilityWindowId: string;
+  actorUserId: string;
+  reason?: string;
+}) {
+  const specialist = await db.specialist.findUnique({
+    where: {
+      id: input.specialistId,
+    },
+    select: {
+      id: true,
+      name: true,
+    },
+  });
+
+  if (!specialist) {
+    throw new DomainError("Counsellor not found.", 404);
+  }
+
+  return db.$transaction(async (tx) => {
+    const window = await tx.specialistAvailabilityWindow.findFirst({
+      where: {
+        id: input.availabilityWindowId,
+        specialistId: input.specialistId,
+      },
+      select: {
+        id: true,
+        active: true,
+        startTime: true,
+        endTime: true,
+        availabilityType: true,
+      },
+    });
+
+    if (!window) {
+      throw new DomainError("Availability slot not found.", 404);
+    }
+
+    if (!window.active) {
+      return {
+        id: window.id,
+        specialistId: input.specialistId,
+        availabilityType: window.availabilityType,
+        active: false,
+      };
+    }
+
+    const updated = await tx.specialistAvailabilityWindow.update({
+      where: {
+        id: window.id,
+      },
+      data: {
+        active: false,
+      },
+      select: {
+        id: true,
+        specialistId: true,
+        availabilityType: true,
+        active: true,
+      },
+    });
+
+    await tx.auditLog.create({
+      data: {
+        userId: input.actorUserId,
+        action: "SPECIALIST_AVAILABILITY_SLOT_REMOVED",
+        details: {
+          specialistId: specialist.id,
+          specialistName: specialist.name,
+          availabilityWindowId: window.id,
+          startTime: window.startTime.toISOString(),
+          endTime: window.endTime.toISOString(),
+          availabilityType: window.availabilityType,
+          reason: input.reason?.trim() || null,
+        },
+      },
+    });
+
+    return updated;
+  });
+}
+
 export async function createSpecialist(input: {
   name: string;
   email: string;
@@ -2071,7 +3640,7 @@ export async function createSpecialist(input: {
   });
 
   if (existingCalUserId) {
-    throw new DomainError("Another specialist already uses this Cal.com user id.", 409);
+    throw new DomainError("Another counsellor already uses this Cal.com user id.", 409);
   }
 
   const passwordHash = await hash(input.password || "password123", 10);
@@ -2132,7 +3701,7 @@ export async function updateSpecialistProfile(input: {
 
   if (input.supportsCouples && !normalizedCouplesEventTypeId) {
     throw new DomainError(
-      "Couples event type id is required for specialists that support couples.",
+      "Couples event type id is required for counsellors that support couples.",
       409,
     );
   }
@@ -2153,7 +3722,7 @@ export async function updateSpecialistProfile(input: {
   });
 
   if (!specialist) {
-    throw new DomainError("Specialist not found.", 404);
+    throw new DomainError("Counsellor not found.", 404);
   }
 
   const accountConflict = await db.userAccount.findFirst({
@@ -2183,7 +3752,7 @@ export async function updateSpecialistProfile(input: {
   });
 
   if (specialistConflict) {
-    throw new DomainError("Another specialist already uses this email.", 409);
+    throw new DomainError("Another counsellor already uses this email.", 409);
   }
 
   const calUserConflict = await db.specialist.findFirst({
@@ -2199,7 +3768,7 @@ export async function updateSpecialistProfile(input: {
   });
 
   if (calUserConflict) {
-    throw new DomainError("Another specialist already uses this Cal.com user id.", 409);
+    throw new DomainError("Another counsellor already uses this Cal.com user id.", 409);
   }
 
   const changedFields = {
@@ -2488,6 +4057,93 @@ export async function addWorkflowStep(input: {
   });
 
   return step;
+}
+
+export async function updateWorkflowStep(input: {
+  workflowStepId: string;
+  caseWorkflowTemplateId: string;
+  name: string;
+  type: "FORM" | "REVIEW" | "SYSTEM";
+  formType?: string;
+  required?: boolean;
+  blocksScheduling?: boolean;
+  sortOrder?: number;
+  actorUserId: string;
+}) {
+  const existing = await db.caseWorkflowStep.findUnique({
+    where: {
+      id: input.workflowStepId,
+    },
+    select: {
+      id: true,
+      templateId: true,
+      name: true,
+      type: true,
+      formType: true,
+      required: true,
+      blocksScheduling: true,
+      sortOrder: true,
+    },
+  });
+
+  if (!existing) {
+    throw new DomainError("Workflow step not found.", 404);
+  }
+
+  if (existing.templateId !== input.caseWorkflowTemplateId) {
+    throw new DomainError("Workflow step does not belong to selected template.", 409);
+  }
+
+  const normalizedName = input.name.trim();
+  if (!normalizedName) {
+    throw new DomainError("Workflow step name is required.", 409);
+  }
+
+  const normalizedFormType = input.formType?.trim() || null;
+  const normalizedSortOrder = input.sortOrder ?? 0;
+
+  const updated = await db.caseWorkflowStep.update({
+    where: {
+      id: existing.id,
+    },
+    data: {
+      name: normalizedName,
+      type: input.type,
+      formType: normalizedFormType,
+      required: input.required ?? true,
+      blocksScheduling: input.blocksScheduling ?? false,
+      sortOrder: normalizedSortOrder,
+    },
+  });
+
+  await db.auditLog.create({
+    data: {
+      userId: input.actorUserId,
+      action: "WORKFLOW_STEP_UPDATED",
+      details: {
+        caseWorkflowTemplateId: input.caseWorkflowTemplateId,
+        workflowStepId: existing.id,
+        before: {
+          name: existing.name,
+          type: existing.type,
+          formType: existing.formType,
+          required: existing.required,
+          blocksScheduling: existing.blocksScheduling,
+          sortOrder: existing.sortOrder,
+        },
+        after: {
+          name: updated.name,
+          type: updated.type,
+          formType: updated.formType,
+          required: updated.required,
+          blocksScheduling: updated.blocksScheduling,
+          sortOrder: updated.sortOrder,
+        },
+      },
+    },
+  });
+
+  return updated;
 }
 
 export async function assignWorkflowTemplateToCase(input: {
@@ -2807,7 +4463,10 @@ export async function ingestAvailabilitySubmission(input: {
     }
 
     const participantCount = refreshedCase.participants.length;
-    const durationMinutes = resolveSessionDurationMinutes(refreshedCase.flags, participantCount);
+    const durationMinutes = await resolveSessionDurationMinutes(
+      refreshedCase.flags,
+      participantCount,
+    );
     const availability = computeCaseAvailability(refreshedCase, durationMinutes);
 
     const availabilityStep = await tx.caseWorkflowState.findFirst({
@@ -2919,6 +4578,210 @@ export async function ingestAvailabilitySubmission(input: {
         formType: state.step.formType,
         type: state.step.type,
       })),
+    };
+  });
+}
+
+export async function ingestAvailabilityPreferenceSubmission(input: {
+  caseId?: string;
+  caseReference?: string;
+  participantIdentifiers: string[];
+  timePreferences: string[];
+  location?: string;
+  includeOnline?: boolean;
+  notes?: string;
+  metadata?: Record<string, unknown>;
+  source?: string;
+}) {
+  return db.$transaction(async (tx) => {
+    const caseId = input.caseId?.trim();
+    const caseReference = input.caseReference?.trim().toUpperCase();
+    if (!caseId && !caseReference) {
+      throw new DomainError("caseId or caseReference is required.", 400);
+    }
+
+    const caseRecord = caseId
+      ? await tx.case.findUnique({
+          where: {
+            id: caseId,
+          },
+          include: {
+            participants: {
+              include: {
+                client: true,
+              },
+            },
+          },
+        })
+      : await tx.case.findFirst({
+          where: {
+            reference: caseReference,
+          },
+          include: {
+            participants: {
+              include: {
+                client: true,
+              },
+            },
+          },
+        });
+
+    if (!caseRecord) {
+      throw new DomainError("Case not found for availability preference submission.", 404);
+    }
+
+    const normalizedTimePreferences = Array.from(
+      new Set(
+        input.timePreferences
+          .map((entry) => normalizeIntakeTimePreference(String(entry || "")))
+          .filter((entry): entry is IntakeTimePreference => Boolean(entry)),
+      ),
+    );
+
+    if (normalizedTimePreferences.length === 0) {
+      throw new DomainError(
+        "At least one time-of-day preference is required (morning/afternoon/evening).",
+        400,
+      );
+    }
+
+    const source = input.source?.trim() || "secure_intake";
+    const submittedAt = new Date();
+    const matchedParticipantIdentifiersSet = new Set<string>();
+    for (const rawIdentifier of input.participantIdentifiers) {
+      const identifier = rawIdentifier.trim();
+      if (!identifier) {
+        continue;
+      }
+
+      const participant = findParticipantByIdentifier(caseRecord, identifier);
+      if (!participant) {
+        continue;
+      }
+
+      matchedParticipantIdentifiersSet.add(
+        normalizeParticipantIdentifier(participant.client.email),
+      );
+    }
+    const matchedParticipantIdentifiers = Array.from(matchedParticipantIdentifiersSet);
+
+    if (matchedParticipantIdentifiers.length === 0) {
+      throw new DomainError("No matching participant found for availability preference submission.", 404);
+    }
+
+    const availabilityStep = await tx.caseWorkflowState.findFirst({
+      where: {
+        caseId: caseRecord.id,
+        step: {
+          type: "FORM",
+          OR: [
+            {
+              formType: {
+                equals: AVAILABILITY_SUBMISSION_FORM_TYPE,
+                mode: "insensitive",
+              },
+            },
+            {
+              name: {
+                equals: AVAILABILITY_SUBMISSION_FORM_TYPE,
+                mode: "insensitive",
+              },
+            },
+          ],
+        },
+      },
+      include: {
+        step: true,
+      },
+      orderBy: [{ step: { sortOrder: "asc" } }, { createdAt: "asc" }],
+    });
+
+    if (availabilityStep) {
+      const requiresAllParticipants = stepRequiresAllParticipants(availabilityStep.step.name);
+      const existingParticipantCompletions = Array.isArray(
+        (availabilityStep.metadata as { participantsCompleted?: unknown } | null)
+          ?.participantsCompleted,
+      )
+        ? (
+            (availabilityStep.metadata as { participantsCompleted: unknown[] })
+              .participantsCompleted
+          )
+            .map((value) => String(value))
+            .map((value) => normalizeParticipantIdentifier(value))
+        : [];
+
+      const participantCompletions = Array.from(
+        new Set([...existingParticipantCompletions, ...matchedParticipantIdentifiers]),
+      );
+
+      const shouldMarkCompleted =
+        !requiresAllParticipants ||
+        participantCompletions.length >= caseRecord.participants.length;
+
+      await tx.caseWorkflowState.update({
+        where: {
+          id: availabilityStep.id,
+        },
+        data: {
+          status: shouldMarkCompleted ? "COMPLETED" : "PENDING",
+          completedAt: shouldMarkCompleted ? submittedAt : null,
+          metadata: {
+            ...(input.metadata || {}),
+            source,
+            formType: AVAILABILITY_SUBMISSION_FORM_TYPE,
+            ingestedAt: submittedAt.toISOString(),
+            mode: "manual_assignment_preferences",
+            location: input.location || null,
+            includeOnline: Boolean(input.includeOnline),
+            notes: input.notes || null,
+            timePreferences: normalizedTimePreferences,
+            participantsCompleted: participantCompletions,
+          },
+        },
+      });
+    }
+
+    await createAuditLog(tx, {
+      caseId: caseRecord.id,
+      action: "AVAILABILITY_PREFERENCE_SUBMISSION_INGESTED",
+      details: {
+        caseReference: caseRecord.reference,
+        source,
+        location: input.location || null,
+        includeOnline: Boolean(input.includeOnline),
+        timePreferences: normalizedTimePreferences,
+        participantsCompleted: matchedParticipantIdentifiers,
+      },
+    });
+
+    const pendingBlockingSteps = await tx.caseWorkflowState.findMany({
+      where: {
+        caseId: caseRecord.id,
+        status: "PENDING",
+        step: {
+          required: true,
+          blocksScheduling: true,
+        },
+      },
+      include: {
+        step: true,
+      },
+      orderBy: [{ step: { sortOrder: "asc" } }, { createdAt: "asc" }],
+    });
+
+    return {
+      caseId: caseRecord.id,
+      caseReference: caseRecord.reference,
+      participantCompletions: matchedParticipantIdentifiers.length,
+      requiredParticipantCompletions: caseRecord.participants.length,
+      eligibleForScheduling: pendingBlockingSteps.length === 0,
+      pendingBlockingSteps: pendingBlockingSteps.map((state) => ({
+        id: state.stepId,
+        name: state.step.name,
+        formType: state.step.formType,
+        type: state.step.type,
+      })),
+      timePreferences: normalizedTimePreferences,
     };
   });
 }
@@ -3238,8 +5101,8 @@ export function isCoupleCase(participantCount: number) {
   return participantCount === 2;
 }
 
-export function getRequiredDocumentCodesForStatus(status: CaseStatus) {
-  return REQUIRED_DOCUMENTS_TO_ENTER[status] ?? [];
+export async function getRequiredDocumentCodesForStatus(status: CaseStatus) {
+  return resolveRequiredDocumentCodesForStatus(status);
 }
 
 export function getDocumentCodeFriendlyName(code: string) {

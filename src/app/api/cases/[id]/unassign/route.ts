@@ -6,22 +6,18 @@ import {
   canUserOverride,
   domainErrorMessage,
   isDomainError,
-  overrideCaseAssignment,
+  unassignCaseAssignment,
 } from "@/lib/case-service";
 
-const overrideSchema = z.object({
-  specialistId: z.string().min(1),
+const unassignSchema = z.object({
   reason: z.string().min(1),
-  matchingRuleOverride: z.string().optional(),
-  preferredTimeBlock: z.enum(["MORNING", "AFTERNOON", "EVENING"]).optional(),
-  preferredStartTime: z.string().optional(),
 });
 
-type OverrideRouteContext = {
+type UnassignRouteContext = {
   params: Promise<{ id: string }>;
 };
 
-export async function POST(request: Request, context: OverrideRouteContext) {
+export async function POST(request: Request, context: UnassignRouteContext) {
   const user = await requireApiUser([UserRole.OPS]);
   if (!user) {
     return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
@@ -36,16 +32,12 @@ export async function POST(request: Request, context: OverrideRouteContext) {
   }
 
   try {
-    const payload = overrideSchema.parse(await request.json());
+    const payload = unassignSchema.parse(await request.json());
     const { id } = await context.params;
 
-    const data = await overrideCaseAssignment({
+    const data = await unassignCaseAssignment({
       caseId: id,
-      specialistId: payload.specialistId,
       reason: payload.reason,
-      matchingRuleOverride: payload.matchingRuleOverride,
-      preferredTimeBlock: payload.preferredTimeBlock,
-      preferredStartTime: payload.preferredStartTime,
       actorUserId: user.id,
     });
 

@@ -31,12 +31,13 @@ export default async function SessionBriefingPage({ params }: SessionBriefingPag
   return (
     <AuthenticatedShell
       title={`Session Briefing: ${session.case.reference}`}
-      subtitle="Detailed pre-session packet for specialist execution."
+      subtitle="Detailed pre-session packet for counsellor execution."
       userName={user.name}
       role={user.role}
       navItems={[
         { href: "/specialist/sessions", label: "My Sessions" },
         { href: "/specialist/clients", label: "My Clients" },
+        { href: "/specialist/availability", label: "My Availability" },
       ]}
     >
       <section className="rounded-2xl border border-[color:var(--border)] bg-[color:var(--surface)] p-5 shadow-sm">

@@ -37,6 +37,8 @@ export const LOCATION_OPTIONS = [
   "ENNISKILLEN",
 ] as const;
 
+export const TIME_PREFERENCE_OPTIONS = ["MORNING", "AFTERNOON", "EVENING"] as const;
+
 export const CONTACT_PREFERENCE_ROWS = [
   { key: "contactMainPhone", label: "May we contact you on your main phone number?" },
   { key: "leaveVoicemailMainPhone", label: "May we leave voicemail on your main phone number?" },
@@ -125,6 +127,7 @@ export const newIntakeApiSchema = z
       location: z.enum(LOCATION_OPTIONS),
       includeOnline: z.boolean().default(false),
       notes: z.string().trim().min(1).max(1000),
+      timePreferences: z.array(z.enum(TIME_PREFERENCE_OPTIONS)).min(1).max(3),
       selectedSlots: z.array(availabilitySlotSchema).max(40).default([]),
     }),
     requestedDurationMinutes: z.number().int().positive().optional(),

@@ -1,3 +1,4 @@
+import { getOperationalSettings } from "@/lib/admin-settings";
 import { db } from "@/lib/db";
 import { createSchedulingProvider } from "@/lib/scheduling";
 import type { SchedulingEventType } from "@/lib/scheduling/types";
@@ -9,10 +10,6 @@ export type PublicAvailabilitySlot = {
   endTime: string;
 };
 
-function defaultDurationMinutes(counsellingType: string) {
-  return counsellingType.trim().toLowerCase().includes("couple") ? 60 : 40;
-}
-
 export async function listPublicAvailabilitySlots(input: {
   counsellingType: string;
   durationMinutes?: number;
@@ -23,7 +20,12 @@ export async function listPublicAvailabilitySlots(input: {
   const counsellingType = input.counsellingType.trim().toLowerCase() || "individual";
   const isCouple = counsellingType.includes("couple");
   const eventType: SchedulingEventType = isCouple ? "couple" : "individual";
-  const durationMinutes = input.durationMinutes || defaultDurationMinutes(counsellingType);
+  const operationalSettings = await getOperationalSettings();
+  const durationMinutes =
+    input.durationMinutes ||
+    (isCouple
+      ? operationalSettings.defaultCoupleSessionMinutes
+      : operationalSettings.defaultIndividualSessionMinutes);
   const limit = input.limit ?? 20;
   void input.location;
   void input.includeOnline;
@@ -43,7 +45,7 @@ export async function listPublicAvailabilitySlots(input: {
     return [];
   }
 
-  const provider = createSchedulingProvider(db);
+  const provider = await createSchedulingProvider(db);
 
   const options = await Promise.all(
     specialists.map(async (specialist) => {

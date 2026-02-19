@@ -21,16 +21,17 @@ export default async function SpecialistManagementPage({
 
   return (
     <AuthenticatedShell
-      title="Specialist Management"
-      subtitle="Create specialists and configure Cal.com scheduling mappings."
+      title="Counsellor Management"
+      subtitle="Create counsellors and configure Cal.com scheduling mappings."
       userName={user.name}
       role={user.role}
       navItems={[
         { href: "/admin/cases", label: "All Cases" },
+        { href: "/admin/assignments", label: "Assignments" },
         { href: "/admin/clients", label: "All Clients" },
-        { href: "/admin/specialists", label: "Specialists" },
+        { href: "/admin/specialists", label: "Counsellors" },
         { href: "/admin/workflows", label: "Workflows" },
-        { href: "/admin/settings/intake", label: "Intake Settings" },
+        { href: "/admin/settings", label: "Settings" },
         { href: "/intake", label: "Secure Intake" },
       ]}
     >
@@ -41,7 +42,7 @@ export default async function SpecialistManagementPage({
       ) : null}
 
       <section className="rounded-2xl border border-[color:var(--border)] bg-[color:var(--surface)] p-5 shadow-sm">
-        <h2 className="text-lg font-semibold">Create specialist</h2>
+        <h2 className="text-lg font-semibold">Create counsellor</h2>
         <form action={createSpecialistAction} className="mt-3 grid gap-3 md:grid-cols-2">
           <input type="hidden" name="redirectTo" value={redirectTo} />
 
@@ -90,7 +91,7 @@ export default async function SpecialistManagementPage({
               id="calUserId"
               name="calUserId"
               required
-              placeholder="specialist-cal-user-id"
+              placeholder="counsellor-cal-user-id"
               className="w-full rounded-md border border-[color:var(--border)] px-3 py-2 text-sm"
             />
           </div>
@@ -153,13 +154,13 @@ export default async function SpecialistManagementPage({
             type="submit"
             className="rounded-md bg-[color:var(--accent)] px-4 py-2 text-sm font-medium text-white md:col-span-2"
           >
-            Create specialist
+            Create counsellor
           </button>
         </form>
       </section>
 
       <section className="mt-4 rounded-2xl border border-[color:var(--border)] bg-[color:var(--surface)] p-5 shadow-sm">
-        <h2 className="text-lg font-semibold">Current specialists</h2>
+        <h2 className="text-lg font-semibold">Current counsellors</h2>
         <div className="mt-3 overflow-x-auto">
           <table className="min-w-full divide-y divide-[color:var(--border)] text-sm">
             <thead className="bg-slate-50 text-left">
@@ -171,14 +172,12 @@ export default async function SpecialistManagementPage({
                 <th className="px-3 py-2 font-semibold">Event Type IDs</th>
                 <th className="px-3 py-2 font-semibold">Capabilities</th>
                 <th className="px-3 py-2 font-semibold">Next Session</th>
-                <th className="px-3 py-2 font-semibold">Profile</th>
+                <th className="px-3 py-2 font-semibold">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-[color:var(--border)]">
               {specialists.map((specialist) => {
-                const nextSession = specialist.sessions
-                  .slice()
-                  .sort((a, b) => a.providerStartTime.getTime() - b.providerStartTime.getTime())[0];
+                const nextSession = specialist.sessions[0];
 
                 return (
                   <tr key={specialist.id}>
@@ -200,12 +199,20 @@ export default async function SpecialistManagementPage({
                       {nextSession ? formatDateTime(nextSession.providerStartTime) : "No session"}
                     </td>
                     <td className="px-3 py-2">
-                      <Link
-                        href={`/admin/specialists/${specialist.id}`}
-                        className="rounded-md border border-[color:var(--border)] px-2 py-1 text-xs hover:bg-[color:var(--accent-soft)]"
-                      >
-                        View profile
-                      </Link>
+                      <div className="flex flex-wrap gap-1">
+                        <Link
+                          href={`/admin/specialists/${specialist.id}`}
+                          className="rounded-md border border-[color:var(--border)] px-2 py-1 text-xs hover:bg-[color:var(--accent-soft)]"
+                        >
+                          Profile
+                        </Link>
+                        <Link
+                          href={`/admin/specialists/${specialist.id}/availability`}
+                          className="rounded-md border border-[color:var(--border)] px-2 py-1 text-xs hover:bg-[color:var(--accent-soft)]"
+                        >
+                          Availability
+                        </Link>
+                      </div>
                     </td>
                   </tr>
                 );

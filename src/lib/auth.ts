@@ -7,6 +7,8 @@ import { db } from "@/lib/db";
 
 const SESSION_COOKIE = "cg_session";
 const SESSION_DAYS = 7;
+const EXPIRED_SESSION_CLEANUP_INTERVAL_MS = 5 * 60 * 1000;
+let lastExpiredSessionCleanupAt = 0;
 
 function buildToken() {
   return randomBytes(32).toString("hex");
@@ -21,6 +23,14 @@ function getSessionExpiryDate() {
 export async function signInWithPassword(email: string, password: string) {
   const user = await db.userAccount.findUnique({
     where: { email: email.toLowerCase().trim() },
+    select: {
+      id: true,
+      email: true,
+      name: true,
+      role: true,
+      specialistId: true,
+      passwordHash: true,
+    },
   });
 
   if (!user) {
@@ -76,27 +86,49 @@ export async function getCurrentUser() {
     return null;
   }
 
-  await db.authSession.deleteMany({
-    where: {
-      expiresAt: {
-        lt: new Date(),
-      },
-    },
-  });
+  const now = new Date();
+  const nowMs = now.getTime();
+  if (nowMs - lastExpiredSessionCleanupAt >= EXPIRED_SESSION_CLEANUP_INTERVAL_MS) {
+    lastExpiredSessionCleanupAt = nowMs;
+    void db.authSession
+      .deleteMany({
+        where: {
+          expiresAt: {
+            lt: now,
+          },
+        },
+      })
+      .catch(() => {
+        // Best-effort cleanup; auth checks should never fail because cleanup failed.
+      });
+  }
 
   const session = await db.authSession.findUnique({
-    where: { token },
-    include: {
+    where: {
+      token,
+    },
+    select: {
+      expiresAt: true,
       user: {
-        include: {
-          operationsUser: true,
-          specialist: true,
+        select: {
+          id: true,
+          email: true,
+          name: true,
+          role: true,
+          specialistId: true,
         },
       },
     },
   });
 
-  if (!session || session.expiresAt < new Date()) {
+  if (!session) {
+    return null;
+  }
+
+  if (session.expiresAt < now) {
+    void db.authSession.deleteMany({ where: { token } }).catch(() => {
+      // Best-effort cleanup; stale session rows should not block request flow.
+    });
     return null;
   }
 

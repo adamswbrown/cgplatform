@@ -6,6 +6,7 @@ import {
   appendCaseAuditLog,
   createCaseFromIntake,
   domainErrorMessage,
+  ingestAvailabilityPreferenceSubmission,
   ingestAvailabilitySubmission,
   ingestFormSubmission,
   isDomainError,
@@ -18,6 +19,7 @@ import {
 } from "@/lib/intake-form";
 import { getIntakeFormContent } from "@/lib/intake-settings";
 import { sendIntakeConfirmationEmail } from "@/lib/mailer";
+import { getSchedulingAssignmentMode } from "@/lib/scheduling/config";
 
 function extractIpAddress(request: Request) {
   const forwardedFor = request.headers.get("x-forwarded-for");
@@ -47,6 +49,7 @@ function summarizeCrisisContacts(content: Awaited<ReturnType<typeof getIntakeFor
 }
 
 async function handleModernPayload(request: Request, payload: NewIntakeApiPayload) {
+  const assignmentMode = await getSchedulingAssignmentMode();
   const ipAddress = extractIpAddress(request);
   const riskFlags = extractRiskFlags(payload);
   const signedAt = payload.consent.signedAt ? new Date(payload.consent.signedAt) : new Date();
@@ -117,7 +120,23 @@ async function handleModernPayload(request: Request, payload: NewIntakeApiPayloa
     });
   }
 
-  if (payload.availability.selectedSlots.length > 0) {
+  if (assignmentMode === "manual") {
+    await ingestAvailabilityPreferenceSubmission({
+      caseId: intakeResult.caseId,
+      participantIdentifiers: [
+        payload.primary.email,
+        payload.participantType === "couple" ? payload.secondary.email || "" : "",
+      ].filter(Boolean),
+      timePreferences: payload.availability.timePreferences,
+      location: payload.availability.location,
+      includeOnline: payload.availability.includeOnline,
+      notes: payload.availability.notes,
+      source: "secure_intake",
+      metadata: {
+        participantType: payload.participantType,
+      },
+    });
+  } else if (payload.availability.selectedSlots.length > 0) {
     await ingestAvailabilitySubmission({
       caseId: intakeResult.caseId,
       participantIdentifier: payload.primary.email,

@@ -26,9 +26,9 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
               <BrandWordmark className="h-auto w-full" priority />
             </div>
             <p className="cg-nav-label text-white/85">Secure Access</p>
-            <h1 className="mt-2">Operations And Specialist Login</h1>
+            <h1 className="mt-2">Operations And Counsellor Login</h1>
             <p className="mt-3 max-w-2xl text-sm font-normal text-white/80">
-              Sign in to manage case workflow, specialist assignment, scheduling references, and
+              Sign in to manage case workflow, counsellor assignment, scheduling references, and
               session briefing.
             </p>
           </div>
@@ -40,7 +40,7 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
           <div className="cg-surface-card mx-auto w-full max-w-md p-6">
             <h2>Sign in</h2>
             <p className="mt-1 text-sm text-[color:var(--muted)]">
-              Use your operations or specialist account credentials.
+              Use your operations or counsellor account credentials.
             </p>
 
             {error ? (

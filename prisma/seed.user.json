@@ -1,0 +1,288 @@
+{
+  "clients": [
+    {
+      "firstName": "Example",
+      "lastName": "Prospect",
+      "email": "example.prospect@example.com",
+      "phone": "+441234567890"
+    },
+    {
+      "firstName": "Sam",
+      "lastName": "Carter",
+      "email": "sam.carter@example.com",
+      "phone": "+447700911101"
+    },
+    {
+      "firstName": "Jamie",
+      "lastName": "Reed",
+      "email": "jamie.reed@example.com",
+      "phone": "+447700911102"
+    },
+    {
+      "firstName": "Riley",
+      "lastName": "Stone",
+      "email": "riley.stone@example.com",
+      "phone": "+447700911103"
+    },
+    {
+      "firstName": "Casey",
+      "lastName": "Stone",
+      "email": "casey.stone@example.com",
+      "phone": "+447700911104"
+    },
+    {
+      "firstName": "Blocked",
+      "lastName": "Example",
+      "email": "blocked.example@example.com",
+      "phone": "+447700911105"
+    }
+  ],
+  "cases": [
+    {
+      "reference": "CASE-USER-2001",
+      "status": "READY_TO_SCHEDULE",
+      "intakeSource": "SECURE_LINK",
+      "counsellingType": "individual",
+      "participants": ["example.prospect@example.com"],
+      "notes": "Manual assignment demo case (eligible).",
+      "flags": ["custom_seed"],
+      "workflowCode": "INDIVIDUAL_COUNSELLING",
+      "intakeFormData": {
+        "participantType": "single",
+        "primary": {
+          "title": "Ms",
+          "firstName": "Example",
+          "lastName": "Prospect",
+          "email": "example.prospect@example.com",
+          "mainPhone": "+441234567890",
+          "dateOfBirth": "1992-10-19",
+          "gender": "female",
+          "churchConnection": "yes",
+          "leadershipRole": "no",
+          "heardAbout": "WEBSITE"
+        },
+        "presenting": {
+          "mainIssue": "ANXIETY_STRESS",
+          "issueDuration": "6 months",
+          "previousSupport": "no",
+          "suicidalThoughtsRecently": "no",
+          "attemptedSuicide": "no"
+        },
+        "availability": {
+          "location": "NEWTOWNARDS",
+          "includeOnline": true,
+          "notes": "Weekday morning is preferred.",
+          "timePreferences": ["MORNING"],
+          "selectedSlots": []
+        }
+      },
+      "completedFormTypes": ["INTAKE_FORM", "AVAILABILITY_SUBMISSION"],
+      "documents": [
+        {
+          "code": "TERMS_AND_CONDITIONS",
+          "status": "SENT"
+        }
+      ],
+      "pins": [
+        {
+          "participantEmail": "example.prospect@example.com",
+          "formType": "TERMS_AND_CONDITIONS",
+          "formPath": "/forms/terms-and-conditions",
+          "accessKey": "seed-user-terms-2001",
+          "pin": "667788",
+          "expiresInDays": 30,
+          "maxAttempts": 8
+        }
+      ]
+    },
+    {
+      "reference": "CASE-USER-2002",
+      "status": "READY_TO_SCHEDULE",
+      "intakeSource": "SECURE_LINK",
+      "counsellingType": "individual",
+      "participants": ["sam.carter@example.com"],
+      "notes": "Manual assignment demo case (eligible, afternoon preference).",
+      "flags": ["manual_demo"],
+      "workflowCode": "INDIVIDUAL_COUNSELLING",
+      "intakeFormData": {
+        "participantType": "single",
+        "primary": {
+          "title": "Mr",
+          "firstName": "Sam",
+          "lastName": "Carter",
+          "email": "sam.carter@example.com",
+          "mainPhone": "+447700911101",
+          "dateOfBirth": "1990-05-18",
+          "gender": "male",
+          "churchConnection": "yes",
+          "leadershipRole": "no",
+          "heardAbout": "WEBSITE"
+        },
+        "presenting": {
+          "mainIssue": "ANXIETY_STRESS",
+          "issueDuration": "4 months",
+          "previousSupport": "no",
+          "suicidalThoughtsRecently": "no",
+          "attemptedSuicide": "no"
+        },
+        "availability": {
+          "location": "BANGOR",
+          "includeOnline": true,
+          "notes": "Afternoons on weekdays.",
+          "timePreferences": ["AFTERNOON"],
+          "selectedSlots": []
+        }
+      },
+      "completedFormTypes": ["INTAKE_FORM", "AVAILABILITY_SUBMISSION"]
+    },
+    {
+      "reference": "CASE-USER-2003",
+      "status": "READY_TO_SCHEDULE",
+      "intakeSource": "SECURE_LINK",
+      "counsellingType": "individual",
+      "participants": ["jamie.reed@example.com"],
+      "notes": "Manual assignment demo case (eligible, evening preference).",
+      "flags": ["manual_demo"],
+      "workflowCode": "INDIVIDUAL_COUNSELLING",
+      "intakeFormData": {
+        "participantType": "single",
+        "primary": {
+          "title": "Ms",
+          "firstName": "Jamie",
+          "lastName": "Reed",
+          "email": "jamie.reed@example.com",
+          "mainPhone": "+447700911102",
+          "dateOfBirth": "1988-11-02",
+          "gender": "female",
+          "churchConnection": "no",
+          "leadershipRole": "no",
+          "heardAbout": "OTHER",
+          "heardAboutOtherDetail": "Referral from friend."
+        },
+        "presenting": {
+          "mainIssue": "RELATIONSHIPS",
+          "issueDuration": "1 year",
+          "previousSupport": "yes",
+          "previousSupportDetails": "Brief support through GP.",
+          "suicidalThoughtsRecently": "no",
+          "attemptedSuicide": "no"
+        },
+        "availability": {
+          "location": "ONLINE",
+          "includeOnline": true,
+          "notes": "Evenings are easiest due to work.",
+          "timePreferences": ["EVENING"],
+          "selectedSlots": []
+        }
+      },
+      "completedFormTypes": ["INTAKE_FORM", "AVAILABILITY_SUBMISSION"]
+    },
+    {
+      "reference": "CASE-USER-2004",
+      "status": "READY_TO_SCHEDULE",
+      "intakeSource": "SECURE_LINK",
+      "counsellingType": "couples",
+      "participants": ["riley.stone@example.com", "casey.stone@example.com"],
+      "notes": "Manual assignment demo case (eligible couples).",
+      "flags": ["manual_demo", "couples"],
+      "workflowCode": "COUPLES_COUNSELLING",
+      "intakeFormData": {
+        "participantType": "couple",
+        "primary": {
+          "title": "Mx",
+          "firstName": "Riley",
+          "lastName": "Stone",
+          "email": "riley.stone@example.com",
+          "mainPhone": "+447700911103",
+          "dateOfBirth": "1985-03-22",
+          "gender": "female",
+          "churchConnection": "yes",
+          "leadershipRole": "prefer_not_to_say",
+          "heardAbout": "WEBSITE"
+        },
+        "secondary": {
+          "title": "Mx",
+          "firstName": "Casey",
+          "lastName": "Stone",
+          "email": "casey.stone@example.com",
+          "mainPhone": "+447700911104",
+          "dateOfBirth": "1984-07-09",
+          "gender": "male"
+        },
+        "presenting": {
+          "mainIssue": "MARRIAGE",
+          "issueDuration": "2 years",
+          "previousSupport": "yes",
+          "previousSupportDetails": "Couples support last year.",
+          "suicidalThoughtsRecently": "no",
+          "attemptedSuicide": "no"
+        },
+        "availability": {
+          "location": "NEWTOWNARDS",
+          "includeOnline": true,
+          "notes": "Afternoon and evening availability.",
+          "timePreferences": ["AFTERNOON", "EVENING"],
+          "selectedSlots": []
+        }
+      },
+      "completedFormTypes": [
+        "INTAKE_FORM",
+        "CONSENT_FORM",
+        "AGREEMENT_FORM",
+        "AVAILABILITY_SUBMISSION"
+      ]
+    },
+    {
+      "reference": "CASE-USER-2005",
+      "status": "AWAITING_REVIEW",
+      "intakeSource": "SECURE_LINK",
+      "counsellingType": "individual",
+      "participants": ["blocked.example@example.com"],
+      "notes": "Intentionally blocked workflow demo case.",
+      "flags": ["workflow_blocked_example"],
+      "workflowCode": "INDIVIDUAL_COUNSELLING",
+      "intakeFormData": {
+        "participantType": "single",
+        "primary": {
+          "title": "Mr",
+          "firstName": "Blocked",
+          "lastName": "Example",
+          "email": "blocked.example@example.com",
+          "mainPhone": "+447700911105",
+          "dateOfBirth": "1995-12-11",
+          "gender": "male",
+          "churchConnection": "yes",
+          "leadershipRole": "no",
+          "heardAbout": "WEBSITE"
+        },
+        "presenting": {
+          "mainIssue": "ANXIETY_STRESS",
+          "issueDuration": "3 months",
+          "previousSupport": "no",
+          "suicidalThoughtsRecently": "no",
+          "attemptedSuicide": "no"
+        },
+        "availability": {
+          "location": "NEWTOWNARDS",
+          "includeOnline": false,
+          "notes": "Has not submitted full availability yet.",
+          "timePreferences": ["MORNING"],
+          "selectedSlots": []
+        }
+      },
+      "completedFormTypes": ["INTAKE_FORM"]
+    }
+  ],
+  "formPins": [
+    {
+      "caseReference": "CASE-1001",
+      "participantEmail": "taylor.ng@example.com",
+      "formType": "OUTTAKE_FORM",
+      "formPath": "/forms/outtake",
+      "accessKey": "seed-user-outtake-1001",
+      "pin": "112233",
+      "expiresInDays": 30,
+      "maxAttempts": 8
+    }
+  ]
+}

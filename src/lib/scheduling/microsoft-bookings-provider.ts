@@ -6,7 +6,7 @@ import type {
   SchedulingProvider,
 } from "@/lib/scheduling/types";
 
-export class CalcomSchedulingProvider implements SchedulingProvider {
+export class MicrosoftBookingsSchedulingProvider implements SchedulingProvider {
   constructor(private readonly _persistence: SchedulingPersistence) {}
 
   async getAvailableSlots(
@@ -18,7 +18,7 @@ export class CalcomSchedulingProvider implements SchedulingProvider {
     void eventType;
     void durationMinutes;
     throw new Error(
-      "Scheduling engine 'calcom' is selected, but the Cal.com provider is not implemented yet.",
+      "Scheduling engine 'microsoft_bookings' is selected, but the Microsoft Bookings provider is not implemented yet.",
     );
   }
 
@@ -31,14 +31,14 @@ export class CalcomSchedulingProvider implements SchedulingProvider {
     void startTime;
     void caseData;
     throw new Error(
-      "Scheduling engine 'calcom' is selected, but the Cal.com provider is not implemented yet.",
+      "Scheduling engine 'microsoft_bookings' is selected, but the Microsoft Bookings provider is not implemented yet.",
     );
   }
 
   async cancelBooking(bookingId: string): Promise<void> {
     void bookingId;
     throw new Error(
-      "Scheduling engine 'calcom' is selected, but the Cal.com provider is not implemented yet.",
+      "Scheduling engine 'microsoft_bookings' is selected, but the Microsoft Bookings provider is not implemented yet.",
     );
   }
 }

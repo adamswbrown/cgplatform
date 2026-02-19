@@ -40,16 +40,17 @@ export default async function SpecialistProfilePage({
 
   return (
     <AuthenticatedShell
-      title={`Specialist Profile: ${specialist.name}`}
+      title={`Counsellor Profile: ${specialist.name}`}
       subtitle="Operations profile view for assignment fit and Cal.com scheduling mappings."
       userName={user.name}
       role={user.role}
       navItems={[
         { href: "/admin/cases", label: "All Cases" },
+        { href: "/admin/assignments", label: "Assignments" },
         { href: "/admin/clients", label: "All Clients" },
-        { href: "/admin/specialists", label: "Specialists" },
+        { href: "/admin/specialists", label: "Counsellors" },
         { href: "/admin/workflows", label: "Workflows" },
-        { href: "/admin/settings/intake", label: "Intake Settings" },
+        { href: "/admin/settings", label: "Settings" },
         { href: "/intake", label: "Secure Intake" },
       ]}
     >
@@ -60,7 +61,7 @@ export default async function SpecialistProfilePage({
       ) : null}
       {updated ? (
         <p className="mb-4 rounded-md border border-emerald-300 bg-emerald-50 px-3 py-2 text-sm text-emerald-900">
-          Specialist profile updated.
+          Counsellor profile updated.
         </p>
       ) : null}
 
@@ -117,18 +118,26 @@ export default async function SpecialistProfilePage({
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
               <p className="text-xs font-semibold uppercase tracking-wide text-[color:var(--muted)]">
-                Specialist ID
+                Counsellor ID
               </p>
               <p className="text-sm text-[color:var(--muted)]">{specialist.id}</p>
               <h2 className="mt-2 text-2xl font-semibold">{specialist.name}</h2>
             </div>
 
-            <Link
-              href="/admin/specialists"
-              className="rounded-md border border-[color:var(--border)] px-3 py-2 text-sm hover:bg-[color:var(--accent-soft)]"
-            >
-              Back to specialists
-            </Link>
+            <div className="flex flex-wrap items-center gap-2">
+              <Link
+                href={`/admin/specialists/${specialist.id}/availability`}
+                className="rounded-md border border-[color:var(--border)] px-3 py-2 text-sm hover:bg-[color:var(--accent-soft)]"
+              >
+                Edit availability
+              </Link>
+              <Link
+                href="/admin/specialists"
+                className="rounded-md border border-[color:var(--border)] px-3 py-2 text-sm hover:bg-[color:var(--accent-soft)]"
+              >
+                Back to counsellors
+              </Link>
+            </div>
           </div>
 
           <div className="mt-4 grid gap-3 md:grid-cols-2">
@@ -192,7 +201,7 @@ export default async function SpecialistProfilePage({
 
         <section className="space-y-4">
           <div className="rounded-2xl border border-[color:var(--border)] bg-[color:var(--surface)] p-4 shadow-sm">
-            <h3 className="text-sm font-semibold">Edit specialist profile</h3>
+            <h3 className="text-sm font-semibold">Edit counsellor profile</h3>
             <form action={updateSpecialistProfileAction} className="mt-3 space-y-3">
               <input type="hidden" name="specialistId" value={specialist.id} />
               <input type="hidden" name="redirectTo" value={`/admin/specialists/${specialist.id}`} />
@@ -285,7 +294,7 @@ export default async function SpecialistProfilePage({
 
               <label className="flex items-center gap-2 text-sm">
                 <input type="checkbox" name="active" defaultChecked={specialist.active} />
-                Active specialist
+                Active counsellor
               </label>
 
               <div>

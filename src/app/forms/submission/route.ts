@@ -3,6 +3,7 @@ import { z } from "zod";
 import {
   DomainError,
   domainErrorMessage,
+  ingestAvailabilityPreferenceSubmission,
   ingestAvailabilitySubmission,
   ingestFormSubmission,
   isDomainError,
@@ -124,37 +125,63 @@ export async function POST(request: Request) {
 
     if (normalizedFormType === AVAILABILITY_SUBMISSION_FORM_TYPE) {
       const windowsValue = (metadata as { windows?: unknown }).windows;
-      if (!Array.isArray(windowsValue) || windowsValue.length === 0) {
-        return NextResponse.json(
-          {
-            ok: false,
-            error:
-              "AVAILABILITY_SUBMISSION requires metadata.windows with startTime and endTime values.",
-          },
-          { status: 400 },
-        );
+      const hasWindows = Array.isArray(windowsValue) && windowsValue.length > 0;
+
+      let data:
+        | Awaited<ReturnType<typeof ingestAvailabilitySubmission>>
+        | Awaited<ReturnType<typeof ingestAvailabilityPreferenceSubmission>>;
+      if (hasWindows) {
+        const windows = windowsValue.map((value) => {
+          const candidate = value as { startTime?: unknown; endTime?: unknown };
+          return {
+            startTime: String(candidate.startTime || ""),
+            endTime: String(candidate.endTime || ""),
+          };
+        });
+
+        data = await ingestAvailabilitySubmission({
+          participantIdentifier: payload.participantIdentifier,
+          caseId: payload.caseId,
+          caseReference: payload.caseReference,
+          timezone:
+            payload.timezone ||
+            (metadata as { timezone?: unknown }).timezone?.toString() ||
+            "UTC",
+          windows,
+          metadata,
+          source: payload.source || "external_form",
+        });
+      } else {
+        const timePreferencesRaw = (metadata as { timePreferences?: unknown }).timePreferences;
+        if (!Array.isArray(timePreferencesRaw) || timePreferencesRaw.length === 0) {
+          return NextResponse.json(
+            {
+              ok: false,
+              error:
+                "AVAILABILITY_SUBMISSION requires metadata.windows or metadata.timePreferences.",
+            },
+            { status: 400 },
+          );
+        }
+
+        data = await ingestAvailabilityPreferenceSubmission({
+          caseId: payload.caseId,
+          caseReference: payload.caseReference,
+          participantIdentifiers: [payload.participantIdentifier],
+          timePreferences: timePreferencesRaw.map((value) => String(value)),
+          location:
+            typeof (metadata as { location?: unknown }).location === "string"
+              ? (metadata as { location: string }).location
+              : undefined,
+          includeOnline: Boolean((metadata as { includeOnline?: unknown }).includeOnline),
+          notes:
+            typeof (metadata as { notes?: unknown }).notes === "string"
+              ? (metadata as { notes: string }).notes
+              : undefined,
+          metadata,
+          source: payload.source || "external_form",
+        });
       }
-
-      const windows = windowsValue.map((value) => {
-        const candidate = value as { startTime?: unknown; endTime?: unknown };
-        return {
-          startTime: String(candidate.startTime || ""),
-          endTime: String(candidate.endTime || ""),
-        };
-      });
-
-      const data = await ingestAvailabilitySubmission({
-        participantIdentifier: payload.participantIdentifier,
-        caseId: payload.caseId,
-        caseReference: payload.caseReference,
-        timezone:
-          payload.timezone ||
-          (metadata as { timezone?: unknown }).timezone?.toString() ||
-          "UTC",
-        windows,
-        metadata,
-        source: payload.source || "external_form",
-      });
 
       return NextResponse.json(
         {

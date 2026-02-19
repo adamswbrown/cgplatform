@@ -52,6 +52,11 @@ enum CaseWorkflowStepStatus {
   COMPLETED
 }
 
+enum AvailabilityWindowType {
+  AVAILABLE
+  OUT_OF_OFFICE
+}
+
 model Client {
   id           String            @id @default(cuid())
   firstName    String
@@ -148,6 +153,7 @@ model Specialist {
   calCouplesEventTypeId     String?
   sessions                  Session[]
   assignedCases             Case[]       @relation("CaseAssignedSpecialist")
+  availabilityWindows       SpecialistAvailabilityWindow[]
   userAccount               UserAccount?
   createdAt                 DateTime     @default(now())
   updatedAt                 DateTime     @updatedAt
@@ -285,6 +291,7 @@ model UserAccount {
   auditLogs      AuditLog[]
   issuedFormAccessPins FormAccessPin[] @relation("FormAccessPinIssuer")
   issuedIntakeAccessInvites IntakeAccessInvite[] @relation("IntakeAccessInviteIssuer")
+  managedSpecialistAvailabilityWindows SpecialistAvailabilityWindow[] @relation("SpecialistAvailabilityUpdatedBy")
   createdAt      DateTime        @default(now())
   updatedAt      DateTime        @updatedAt
 }
@@ -370,4 +377,27 @@ model FormAccessPin {
   @@index([caseId, formType, expiresAt])
   @@index([clientId, formType, expiresAt])
   @@index([expiresAt])
+}
+
+model SpecialistAvailabilityWindow {
+  id              String      @id @default(cuid())
+  specialistId    String
+  startTime       DateTime
+  endTime         DateTime
+  timezone        String      @default("Europe/London")
+  availabilityType AvailabilityWindowType @default(AVAILABLE)
+  source          String      @default("manual_calendar")
+  notes           String?
+  metadata        Json?
+  active          Boolean     @default(true)
+  createdByUserId String?
+  specialist      Specialist  @relation(fields: [specialistId], references: [id], onDelete: Cascade)
+  createdBy       UserAccount? @relation("SpecialistAvailabilityUpdatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+
+  @@index([specialistId, active, startTime])
+  @@index([specialistId, startTime, endTime])
+  @@index([createdByUserId, createdAt])
+  @@index([active, endTime])
 }

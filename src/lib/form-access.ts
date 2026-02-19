@@ -2,6 +2,7 @@ import { createHash, randomBytes, randomInt, timingSafeEqual } from "node:crypto
 import type { Prisma } from "@prisma/client";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
+import { getOperationalSettings } from "@/lib/admin-settings";
 import { db } from "@/lib/db";
 import { DomainError } from "@/lib/case-service";
 
@@ -10,7 +11,6 @@ const INTAKE_ACCESS_COOKIE_PREFIX = "cg_intake_access_";
 const DEFAULT_PIN_DIGITS = 6;
 const DEFAULT_MAX_ATTEMPTS = 5;
 const DEFAULT_EXPIRES_HOURS = 72;
-const DEFAULT_SESSION_HOURS = 8;
 const MAX_EXPIRES_HOURS = 14 * 24;
 
 type ParticipantSummary = {
@@ -112,9 +112,12 @@ function intakeCookieNameForAccessKey(accessKey: string) {
   return `${INTAKE_ACCESS_COOKIE_PREFIX}${safeSegment}`;
 }
 
-function resolveSessionExpiry(expiresAt: Date) {
+async function resolveSessionExpiry(expiresAt: Date) {
+  const operationalSettings = await getOperationalSettings();
   const now = new Date();
-  const sessionCutoff = new Date(now.getTime() + DEFAULT_SESSION_HOURS * 60 * 60 * 1000);
+  const sessionCutoff = new Date(
+    now.getTime() + operationalSettings.formAccessSessionHours * 60 * 60 * 1000,
+  );
   return sessionCutoff < expiresAt ? sessionCutoff : expiresAt;
 }
 
@@ -200,14 +203,15 @@ export async function issueFormPin(input: IssueFormPinInput): Promise<IssueFormP
     throw new DomainError("caseId and participantIdentifier are required.", 400);
   }
 
+  const operationalSettings = await getOperationalSettings();
   const expiresInHours =
     Number.isFinite(input.expiresInHours) && (input.expiresInHours || 0) > 0
       ? Math.min(Math.round(input.expiresInHours || DEFAULT_EXPIRES_HOURS), MAX_EXPIRES_HOURS)
-      : DEFAULT_EXPIRES_HOURS;
+      : operationalSettings.defaultFormPinExpiresHours;
   const maxAttempts =
     Number.isFinite(input.maxAttempts) && (input.maxAttempts || 0) > 0
       ? Math.min(Math.round(input.maxAttempts || DEFAULT_MAX_ATTEMPTS), 20)
-      : DEFAULT_MAX_ATTEMPTS;
+      : operationalSettings.defaultFormPinMaxAttempts;
 
   const caseRecord = await db.case.findUnique({
     where: { id: caseId },
@@ -388,7 +392,7 @@ export async function verifyFormPin(input: VerifyFormPinInput): Promise<VerifyFo
   }
 
   const sessionToken = generateSessionToken();
-  const sessionExpiresAt = resolveSessionExpiry(record.expiresAt);
+  const sessionExpiresAt = await resolveSessionExpiry(record.expiresAt);
   await db.formAccessPin.update({
     where: { id: record.id },
     data: {
@@ -659,14 +663,15 @@ export async function issueIntakeAccessInvite(
   }
 
   const recipientName = input.recipientName?.trim() || null;
+  const operationalSettings = await getOperationalSettings();
   const expiresInHours =
     Number.isFinite(input.expiresInHours) && (input.expiresInHours || 0) > 0
       ? Math.min(Math.round(input.expiresInHours || DEFAULT_EXPIRES_HOURS), MAX_EXPIRES_HOURS)
-      : DEFAULT_EXPIRES_HOURS;
+      : operationalSettings.defaultIntakeInviteExpiresHours;
   const maxAttempts =
     Number.isFinite(input.maxAttempts) && (input.maxAttempts || 0) > 0
       ? Math.min(Math.round(input.maxAttempts || DEFAULT_MAX_ATTEMPTS), 20)
-      : DEFAULT_MAX_ATTEMPTS;
+      : operationalSettings.defaultIntakeInviteMaxAttempts;
 
   const accessKey = generateAccessKey();
   const pin = generatePin(DEFAULT_PIN_DIGITS);
@@ -768,7 +773,7 @@ export async function verifyIntakeAccessInvite(
   }
 
   const sessionToken = generateSessionToken();
-  const sessionExpiresAt = resolveSessionExpiry(record.expiresAt);
+  const sessionExpiresAt = await resolveSessionExpiry(record.expiresAt);
 
   await db.intakeAccessInvite.update({
     where: {

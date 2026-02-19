@@ -3,6 +3,7 @@ import { UserRole } from "@prisma/client";
 import { issueIntakeAccessInviteAction } from "@/app/actions";
 import { AuthenticatedShell } from "@/components/authenticated-shell";
 import { formatDateTime, formatStatus } from "@/lib/format";
+import { getOperationalSettings } from "@/lib/admin-settings";
 import { requirePageUser } from "@/lib/auth";
 import { listCasesForOps } from "@/lib/case-service";
 
@@ -12,7 +13,10 @@ type AdminCasesPageProps = {
 
 export default async function AdminCasesPage({ searchParams }: AdminCasesPageProps) {
   const user = await requirePageUser([UserRole.OPS]);
-  const cases = await listCasesForOps();
+  const [cases, operationalSettings] = await Promise.all([
+    listCasesForOps(),
+    getOperationalSettings(),
+  ]);
   const params = await searchParams;
   const error = typeof params.error === "string" ? params.error : null;
   const intakeInviteIssued = params.intakeInviteIssued === "1";
@@ -30,15 +34,16 @@ export default async function AdminCasesPage({ searchParams }: AdminCasesPagePro
   return (
     <AuthenticatedShell
       title="Operations Cases"
-      subtitle="Track lifecycle progression, workflow compliance, specialist assignment, and auditability."
+      subtitle="Track lifecycle progression, workflow compliance, counsellor assignment, and auditability."
       userName={user.name}
       role={user.role}
       navItems={[
         { href: "/admin/cases", label: "All Cases" },
+        { href: "/admin/assignments", label: "Assignments" },
         { href: "/admin/clients", label: "All Clients" },
-        { href: "/admin/specialists", label: "Specialists" },
+        { href: "/admin/specialists", label: "Counsellors" },
         { href: "/admin/workflows", label: "Workflows" },
-        { href: "/admin/settings/intake", label: "Intake Settings" },
+        { href: "/admin/settings", label: "Settings" },
         { href: "/intake", label: "Secure Intake" },
       ]}
     >
@@ -74,7 +79,15 @@ export default async function AdminCasesPage({ searchParams }: AdminCasesPagePro
       ) : null}
 
       <section className="mb-4 rounded-2xl border border-[color:var(--border)] bg-[color:var(--surface)] p-4 shadow-sm">
-        <h2 className="text-sm font-semibold">Issue Secure Intake Link</h2>
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+          <h2 className="text-sm font-semibold">Issue Secure Intake Link</h2>
+          <Link
+            href="/admin/assignments"
+            className="rounded-full border border-[color:var(--border)] px-3 py-1 text-xs font-semibold hover:bg-[color:var(--accent-soft)]"
+          >
+            Open Assignment Board
+          </Link>
+        </div>
         <p className="mt-1 text-xs text-[color:var(--muted)]">
           Intake is PIN-gated and not publicly accessible. Generate a secure link and PIN for a prospective client.
         </p>
@@ -114,7 +127,7 @@ export default async function AdminCasesPage({ searchParams }: AdminCasesPagePro
               type="number"
               min={1}
               max={336}
-              defaultValue={72}
+              defaultValue={operationalSettings.defaultIntakeInviteExpiresHours}
               className="w-full rounded-md border border-[color:var(--border)] px-2 py-2 text-sm"
             />
           </div>
@@ -128,7 +141,7 @@ export default async function AdminCasesPage({ searchParams }: AdminCasesPagePro
               type="number"
               min={1}
               max={20}
-              defaultValue={5}
+              defaultValue={operationalSettings.defaultIntakeInviteMaxAttempts}
               className="w-full rounded-md border border-[color:var(--border)] px-2 py-2 text-sm"
             />
           </div>
@@ -156,7 +169,7 @@ export default async function AdminCasesPage({ searchParams }: AdminCasesPagePro
                 <th className="px-4 py-3 font-semibold">Status</th>
                 <th className="px-4 py-3 font-semibold">Participants</th>
                 <th className="px-4 py-3 font-semibold">Workflow</th>
-                <th className="px-4 py-3 font-semibold">Assigned Specialist</th>
+                <th className="px-4 py-3 font-semibold">Assigned Counsellor</th>
                 <th className="px-4 py-3 font-semibold">Next Session</th>
                 <th className="px-4 py-3 font-semibold">Required Docs</th>
                 <th className="px-4 py-3 font-semibold">Scheduling Gate</th>

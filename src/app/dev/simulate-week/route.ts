@@ -49,6 +49,52 @@ function buildParticipantAvailabilityWindows(participantType: "single" | "couple
   return [buildWindow(2, 11, 14), buildWindow(4, 15, 17)];
 }
 
+function buildIntakePayload(input: {
+  participantType: "single" | "couple";
+  primaryEmail: string;
+  secondaryEmail?: string;
+  duration: number;
+}) {
+  const primaryWindows = buildParticipantAvailabilityWindows(
+    input.participantType,
+    "primary",
+  );
+
+  return {
+    participantType: input.participantType,
+    primary: {
+      firstName: "Sim",
+      lastName: "Primary",
+      email: input.primaryEmail,
+      mainPhone: "+440000000101",
+    },
+    secondary:
+      input.participantType === "couple"
+        ? {
+            firstName: "Sim",
+            lastName: "Secondary",
+            email: input.secondaryEmail || "",
+            mainPhone: "+440000000102",
+          }
+        : {},
+    presenting: {
+      mainIssue: "ANXIETY_STRESS",
+      issueDuration: "Simulated payload",
+      previousSupport: "no",
+      suicidalThoughtsRecently: "no",
+      attemptedSuicide: "no",
+    },
+    availability: {
+      location: "NEWTOWNARDS",
+      includeOnline: true,
+      notes: `Simulated availability for ${input.duration} minute session`,
+      timePreferences: ["MORNING", "AFTERNOON"],
+      selectedSlots: primaryWindows,
+    },
+    requestedDurationMinutes: input.duration,
+  };
+}
+
 async function completeBlockingForms(
   caseId: string,
   participants: { primaryEmail: string; secondaryEmail?: string },
@@ -167,6 +213,11 @@ export async function POST(request: Request) {
     index += 1;
     const single = await createCaseFromIntake({
       counsellingType: "individual",
+      intakeFormData: buildIntakePayload({
+        participantType: "single",
+        primaryEmail: buildUniqueEmail(runToken, "single", index),
+        duration,
+      }),
       primary: {
         firstName: "Sim",
         lastName: `Single${index}`,
@@ -202,6 +253,12 @@ export async function POST(request: Request) {
     const coupleSecondaryEmail = buildUniqueEmail(runToken, "couple", index + 1000);
     const couple = await createCaseFromIntake({
       counsellingType: "couples",
+      intakeFormData: buildIntakePayload({
+        participantType: "couple",
+        primaryEmail: couplePrimaryEmail,
+        secondaryEmail: coupleSecondaryEmail,
+        duration,
+      }),
       primary: {
         firstName: "Sim",
         lastName: `CoupleA${index}`,

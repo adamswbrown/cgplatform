@@ -12,7 +12,7 @@ const poppins = Poppins({
 export const metadata: Metadata = {
   title: "Case Workflow MVP",
   description:
-    "Service-delivery workflow MVP with automated specialist allocation, scheduling, and document lifecycle.",
+    "Service-delivery workflow MVP with automated counsellor allocation, scheduling, and document lifecycle.",
 };
 
 export default function RootLayout({

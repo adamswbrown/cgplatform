@@ -11,17 +11,18 @@ export default async function SpecialistSessionsPage() {
   if (!user.specialistId) {
     return (
       <AuthenticatedShell
-        title="Specialist Dashboard"
-        subtitle="No specialist profile linked to your account."
+        title="Counsellor Dashboard"
+        subtitle="No counsellor profile linked to your account."
         userName={user.name}
         role={user.role}
         navItems={[
           { href: "/specialist/sessions", label: "My Sessions" },
           { href: "/specialist/clients", label: "My Clients" },
+          { href: "/specialist/availability", label: "My Availability" },
         ]}
       >
         <p className="rounded-md border border-[color:var(--danger)] bg-red-50 px-3 py-2 text-sm text-[color:var(--danger)]">
-          Contact operations to link your account to a specialist profile.
+          Contact operations to link your account to a counsellor profile.
         </p>
       </AuthenticatedShell>
     );
@@ -38,6 +39,7 @@ export default async function SpecialistSessionsPage() {
       navItems={[
         { href: "/specialist/sessions", label: "My Sessions" },
         { href: "/specialist/clients", label: "My Clients" },
+        { href: "/specialist/availability", label: "My Availability" },
       ]}
     >
       <div className="grid gap-4">

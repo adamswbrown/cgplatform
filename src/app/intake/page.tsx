@@ -3,6 +3,7 @@ import { BrandWordmark } from "@/components/brand-wordmark";
 import { IntakeMultiStepForm } from "@/components/intake/intake-multi-step-form";
 import { requireIntakeAccessOrRedirect } from "@/lib/form-access";
 import { getIntakeFormContent } from "@/lib/intake-settings";
+import { getSchedulingAssignmentMode } from "@/lib/scheduling/config";
 
 type IntakePageProps = {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
@@ -14,6 +15,7 @@ export default async function IntakePage({ searchParams }: IntakePageProps) {
   const error = typeof errorParam === "string" ? errorParam : null;
   const accessKey = typeof params.accessKey === "string" ? params.accessKey : "";
   const content = await getIntakeFormContent();
+  const assignmentMode = await getSchedulingAssignmentMode();
 
   if (!accessKey) {
     return (
@@ -84,11 +86,16 @@ export default async function IntakePage({ searchParams }: IntakePageProps) {
       <section className="cg-section cg-theme-light">
         <div className="cg-container cg-gutters">
           <section className="cg-surface-card mx-auto w-full max-w-4xl p-6">
-            <IntakeMultiStepForm content={content} initialError={error} accessKey={accessKey} />
+            <IntakeMultiStepForm
+              content={content}
+              initialError={error}
+              accessKey={accessKey}
+              assignmentMode={assignmentMode}
+            />
           </section>
 
           <footer className="mx-auto mt-5 w-full max-w-4xl text-sm text-[color:var(--muted)]">
-            Operations and specialists can sign in at{" "}
+            Operations and counsellors can sign in at{" "}
             <Link href="/login" className="underline">
               /login
             </Link>

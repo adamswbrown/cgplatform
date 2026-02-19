@@ -7,6 +7,7 @@ import {
   HEARD_ABOUT_OPTIONS,
   LOCATION_OPTIONS,
   PRESENTING_ISSUE_OPTIONS,
+  TIME_PREFERENCE_OPTIONS,
 } from "@/lib/intake-form";
 import type { IntakeFormContent } from "@/lib/intake-settings";
 
@@ -14,6 +15,7 @@ type IntakeMultiStepFormProps = {
   content: IntakeFormContent;
   initialError?: string | null;
   accessKey: string;
+  assignmentMode: "manual" | "auto";
 };
 
 type PublicAvailabilitySlot = {
@@ -210,7 +212,12 @@ function SignatureCapture({
   );
 }
 
-export function IntakeMultiStepForm({ content, initialError, accessKey }: IntakeMultiStepFormProps) {
+export function IntakeMultiStepForm({
+  content,
+  initialError,
+  accessKey,
+  assignmentMode,
+}: IntakeMultiStepFormProps) {
   const router = useRouter();
   const [step, setStep] = useState(0);
   const [submitError, setSubmitError] = useState<string | null>(initialError || null);
@@ -268,6 +275,7 @@ export function IntakeMultiStepForm({ content, initialError, accessKey }: Intake
 
   const [location, setLocation] = useState<(typeof LOCATION_OPTIONS)[number]>("NEWTOWNARDS");
   const [includeOnline, setIncludeOnline] = useState(false);
+  const [timePreferences, setTimePreferences] = useState<(typeof TIME_PREFERENCE_OPTIONS)[number][]>([]);
   const [availabilityNotes, setAvailabilityNotes] = useState("");
   const [availabilitySlots, setAvailabilitySlots] = useState<PublicAvailabilitySlot[]>([]);
   const [selectedSlotKeys, setSelectedSlotKeys] = useState<string[]>([]);
@@ -278,6 +286,14 @@ export function IntakeMultiStepForm({ content, initialError, accessKey }: Intake
   const currentSignature = signatureType === "typed" ? typedSignature.trim() : drawnSignature;
 
   useEffect(() => {
+    if (assignmentMode !== "auto") {
+      setAvailabilitySlots([]);
+      setAvailabilityError(null);
+      setAvailabilityLoading(false);
+      setSelectedSlotKeys([]);
+      return;
+    }
+
     const controller = new AbortController();
     const load = async () => {
       setAvailabilityLoading(true);
@@ -317,7 +333,7 @@ export function IntakeMultiStepForm({ content, initialError, accessKey }: Intake
 
     load();
     return () => controller.abort();
-  }, [counsellingType, includeOnline, location]);
+  }, [assignmentMode, counsellingType, includeOnline, location]);
 
   const selectedSlots = useMemo(() => {
     const selected = new Set(selectedSlotKeys);
@@ -328,6 +344,14 @@ export function IntakeMultiStepForm({ content, initialError, accessKey }: Intake
     const key = `${slot.startTime}|${slot.endTime}`;
     setSelectedSlotKeys((current) =>
       current.includes(key) ? current.filter((value) => value !== key) : [...current, key],
+    );
+  };
+
+  const toggleTimePreference = (preference: (typeof TIME_PREFERENCE_OPTIONS)[number]) => {
+    setTimePreferences((current) =>
+      current.includes(preference)
+        ? current.filter((entry) => entry !== preference)
+        : [...current, preference],
     );
   };
 
@@ -396,7 +420,10 @@ export function IntakeMultiStepForm({ content, initialError, accessKey }: Intake
       if (!location || !availabilityNotes.trim()) {
         return "Please choose a location and provide your availability notes.";
       }
-      if (availabilitySlots.length > 0 && selectedSlots.length === 0) {
+      if (timePreferences.length === 0) {
+        return "Please select at least one preferred time of day.";
+      }
+      if (assignmentMode === "auto" && availabilitySlots.length > 0 && selectedSlots.length === 0) {
         return "Please select at least one availability slot from the availability widget.";
       }
     }
@@ -499,10 +526,14 @@ export function IntakeMultiStepForm({ content, initialError, accessKey }: Intake
             location,
             includeOnline,
             notes: availabilityNotes,
-            selectedSlots: selectedSlots.map((slot) => ({
-              startTime: slot.startTime,
-              endTime: slot.endTime,
-            })),
+            timePreferences,
+            selectedSlots:
+              assignmentMode === "auto"
+                ? selectedSlots.map((slot) => ({
+                    startTime: slot.startTime,
+                    endTime: slot.endTime,
+                  }))
+                : [],
           },
         }),
       });
@@ -993,6 +1024,11 @@ export function IntakeMultiStepForm({ content, initialError, accessKey }: Intake
           <div className="rounded-2xl border border-[color:var(--border)] p-4">
             <h3 className="text-xl">{content.availability.heading}</h3>
             <p className="mt-2 text-sm text-[color:var(--muted)]">{content.availability.subheading}</p>
+            <p className="mt-2 text-xs text-[color:var(--muted)]">
+              {assignmentMode === "manual"
+                ? "Ops will assign your counsellor manually using your selected time-of-day preferences."
+                : "Your selected availability will be matched against provider availability automatically."}
+            </p>
 
             <div className="mt-4 border-t border-[color:var(--border)] pt-4">
               <p className="text-sm font-semibold">
@@ -1020,6 +1056,25 @@ export function IntakeMultiStepForm({ content, initialError, accessKey }: Intake
               </div>
             </div>
 
+            <div className="mt-4 border-t border-[color:var(--border)] pt-4">
+              <p className="text-sm font-semibold">Which times of day are you usually available? *</p>
+              <div className="mt-2 flex flex-wrap gap-3">
+                {TIME_PREFERENCE_OPTIONS.map((option) => (
+                  <label
+                    key={option}
+                    className="flex items-center gap-2 rounded-full border border-[color:var(--border)] px-3 py-1.5 text-sm"
+                  >
+                    <input
+                      type="checkbox"
+                      checked={timePreferences.includes(option)}
+                      onChange={() => toggleTimePreference(option)}
+                    />
+                    {toLabel(option)}
+                  </label>
+                ))}
+              </div>
+            </div>
+
             <div className="mt-5 space-y-3">
               {content.availability.notes.map((note) => (
                 <div key={note.title}>
@@ -1032,37 +1087,50 @@ export function IntakeMultiStepForm({ content, initialError, accessKey }: Intake
             </div>
           </div>
 
-          <div className="rounded-2xl border border-[color:var(--border)] p-4">
-            <h4 className="text-base">Availability Widget</h4>
-            <p className="mt-1 text-sm text-[color:var(--muted)]">
-              Select one or more suitable windows from provider availability.
-            </p>
-            {availabilityLoading ? <p className="mt-3 text-sm">Loading availability...</p> : null}
-            {availabilityError ? (
-              <p className="mt-3 rounded-xl border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900">
-                {availabilityError}
+          {assignmentMode === "auto" ? (
+            <div className="rounded-2xl border border-[color:var(--border)] p-4">
+              <h4 className="text-base">Availability Widget</h4>
+              <p className="mt-1 text-sm text-[color:var(--muted)]">
+                Select one or more suitable windows from provider availability.
               </p>
-            ) : null}
-            {!availabilityLoading && availabilitySlots.length > 0 ? (
-              <div className="mt-3 max-h-72 space-y-2 overflow-y-auto pr-1">
-                {availabilitySlots.map((slot) => {
-                  const key = `${slot.startTime}|${slot.endTime}`;
-                  const checked = selectedSlotKeys.includes(key);
-                  return (
-                    <label key={key} className="flex items-start gap-2 rounded-xl border border-[color:var(--border)] p-2 text-sm">
-                      <input type="checkbox" checked={checked} onChange={() => toggleSlot(slot)} />
-                      <span>
-                        <span className="block font-medium">{formatSlotLabel(slot.startTime, slot.endTime)}</span>
-                        <span className="block text-xs text-[color:var(--muted)]">
-                          Based on current provider availability
+              {availabilityLoading ? <p className="mt-3 text-sm">Loading availability...</p> : null}
+              {availabilityError ? (
+                <p className="mt-3 rounded-xl border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+                  {availabilityError}
+                </p>
+              ) : null}
+              {!availabilityLoading && availabilitySlots.length > 0 ? (
+                <div className="mt-3 max-h-72 space-y-2 overflow-y-auto pr-1">
+                  {availabilitySlots.map((slot) => {
+                    const key = `${slot.startTime}|${slot.endTime}`;
+                    const checked = selectedSlotKeys.includes(key);
+                    return (
+                      <label
+                        key={key}
+                        className="flex items-start gap-2 rounded-xl border border-[color:var(--border)] p-2 text-sm"
+                      >
+                        <input type="checkbox" checked={checked} onChange={() => toggleSlot(slot)} />
+                        <span>
+                          <span className="block font-medium">{formatSlotLabel(slot.startTime, slot.endTime)}</span>
+                          <span className="block text-xs text-[color:var(--muted)]">
+                            Based on current provider availability
+                          </span>
                         </span>
-                      </span>
-                    </label>
-                  );
-                })}
+                      </label>
+                    );
+                  })}
+                </div>
+              ) : null}
+            </div>
+          ) : (
+            <div className="rounded-2xl border border-[color:var(--border)] bg-[color:var(--accent-soft)]/20 p-4">
+              <h4 className="text-base">Manual allocation</h4>
+              <p className="mt-1 text-sm text-[color:var(--muted)]">
+                A member of our operations team will assign your counsellor and confirm a time based on
+                your selected preferences.
+              </p>
               </div>
-            ) : null}
-          </div>
+          )}
 
           <div>
             <label htmlFor="availabilityNotes" className="mb-1 block text-sm font-medium">

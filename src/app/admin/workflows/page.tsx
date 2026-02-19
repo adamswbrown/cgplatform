@@ -1,5 +1,9 @@
 import { UserRole } from "@prisma/client";
-import { addWorkflowStepAction, createWorkflowTemplateAction } from "@/app/actions";
+import {
+  addWorkflowStepAction,
+  createWorkflowTemplateAction,
+  updateWorkflowStepAction,
+} from "@/app/actions";
 import { AuthenticatedShell } from "@/components/authenticated-shell";
 import { requirePageUser } from "@/lib/auth";
 import { listWorkflowTemplatesForOps } from "@/lib/case-service";
@@ -21,10 +25,11 @@ export default async function AdminWorkflowsPage({ searchParams }: AdminWorkflow
       role={user.role}
       navItems={[
         { href: "/admin/cases", label: "All Cases" },
+        { href: "/admin/assignments", label: "Assignments" },
         { href: "/admin/clients", label: "All Clients" },
-        { href: "/admin/specialists", label: "Specialists" },
+        { href: "/admin/specialists", label: "Counsellors" },
         { href: "/admin/workflows", label: "Workflows" },
-        { href: "/admin/settings/intake", label: "Intake Settings" },
+        { href: "/admin/settings", label: "Settings" },
         { href: "/intake", label: "Secure Intake" },
       ]}
     >
@@ -125,6 +130,7 @@ export default async function AdminWorkflowsPage({ searchParams }: AdminWorkflow
                     <th className="px-3 py-2 font-semibold">Form Type</th>
                     <th className="px-3 py-2 font-semibold">Required</th>
                     <th className="px-3 py-2 font-semibold">Blocks Scheduling</th>
+                    <th className="px-3 py-2 font-semibold">Actions</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-[color:var(--border)]">
@@ -136,11 +142,93 @@ export default async function AdminWorkflowsPage({ searchParams }: AdminWorkflow
                       <td className="px-3 py-2">{step.formType || "-"}</td>
                       <td className="px-3 py-2">{step.required ? "Yes" : "No"}</td>
                       <td className="px-3 py-2">{step.blocksScheduling ? "Yes" : "No"}</td>
+                      <td className="px-3 py-2 align-top">
+                        <details>
+                          <summary className="cursor-pointer text-xs font-semibold uppercase tracking-wide text-[color:var(--accent)]">
+                            Edit
+                          </summary>
+                          <form
+                            action={updateWorkflowStepAction}
+                            className="mt-2 grid min-w-[280px] gap-2 rounded-md border border-[color:var(--border)] bg-white p-2"
+                          >
+                            <input type="hidden" name="workflowStepId" value={step.id} />
+                            <input
+                              type="hidden"
+                              name="caseWorkflowTemplateId"
+                              value={workflow.id}
+                            />
+                            <input type="hidden" name="redirectTo" value="/admin/workflows" />
+
+                            <label className="text-xs">
+                              Step name
+                              <input
+                                name="name"
+                                defaultValue={step.name}
+                                required
+                                className="mt-1 w-full rounded-md border border-[color:var(--border)] px-2 py-1 text-sm"
+                              />
+                            </label>
+
+                            <label className="text-xs">
+                              Type
+                              <select
+                                name="type"
+                                defaultValue={step.type}
+                                className="mt-1 w-full rounded-md border border-[color:var(--border)] px-2 py-1 text-sm"
+                              >
+                                <option value="FORM">FORM</option>
+                                <option value="REVIEW">REVIEW</option>
+                                <option value="SYSTEM">SYSTEM</option>
+                              </select>
+                            </label>
+
+                            <label className="text-xs">
+                              Form type (optional)
+                              <input
+                                name="formType"
+                                defaultValue={step.formType ?? ""}
+                                className="mt-1 w-full rounded-md border border-[color:var(--border)] px-2 py-1 text-sm"
+                              />
+                            </label>
+
+                            <label className="text-xs">
+                              Sort order
+                              <input
+                                name="sortOrder"
+                                type="number"
+                                defaultValue={step.sortOrder}
+                                className="mt-1 w-full rounded-md border border-[color:var(--border)] px-2 py-1 text-sm"
+                              />
+                            </label>
+
+                            <label className="inline-flex items-center gap-2 text-xs">
+                              <input type="checkbox" name="required" defaultChecked={step.required} />
+                              Required
+                            </label>
+
+                            <label className="inline-flex items-center gap-2 text-xs">
+                              <input
+                                type="checkbox"
+                                name="blocksScheduling"
+                                defaultChecked={step.blocksScheduling}
+                              />
+                              Blocks scheduling
+                            </label>
+
+                            <button
+                              type="submit"
+                              className="w-fit rounded-md border border-[color:var(--border)] px-2 py-1 text-xs font-semibold hover:bg-[color:var(--accent-soft)]"
+                            >
+                              Save
+                            </button>
+                          </form>
+                        </details>
+                      </td>
                     </tr>
                   ))}
                   {workflow.steps.length === 0 ? (
                     <tr>
-                      <td className="px-3 py-3 text-[color:var(--muted)]" colSpan={6}>
+                      <td className="px-3 py-3 text-[color:var(--muted)]" colSpan={7}>
                         No steps configured.
                       </td>
                     </tr>
