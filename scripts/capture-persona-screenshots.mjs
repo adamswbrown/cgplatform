@@ -18,9 +18,30 @@ async function waitForStable(page) {
   await page.waitForTimeout(750);
 }
 
+async function assertNoRuntimeError(page, stageLabel) {
+  const bodyText = (await page.textContent("body")) || "";
+  const errorSignatures = [
+    "Runtime PrismaClientValidationError",
+    "Unhandled Runtime Error",
+    "Unknown field `availabilityType`",
+    "Invalid `this.persistence.specialistAvailabilityWindow.findMany()` invocation",
+  ];
+
+  const hit = errorSignatures.find((entry) => bodyText.includes(entry));
+  if (hit) {
+    throw new Error(`Runtime error detected at stage "${stageLabel}": ${hit}`);
+  }
+}
+
 async function saveShot(page, fileName) {
   const outputPath = path.join(OUTPUT_DIR, fileName);
   await page.screenshot({ path: outputPath, fullPage: false });
+  return outputPath;
+}
+
+async function saveLocatorShot(locator, fileName) {
+  const outputPath = path.join(OUTPUT_DIR, fileName);
+  await locator.screenshot({ path: outputPath });
   return outputPath;
 }
 
@@ -44,6 +65,7 @@ async function captureClientJourney(browser) {
     waitUntil: "domcontentloaded",
   });
   await waitForStable(page);
+  await assertNoRuntimeError(page, "client_pin_entry");
   shots.push({
     key: "client_pin_entry",
     title: "End Client: Secure Intake PIN Entry",
@@ -56,6 +78,7 @@ async function captureClientJourney(browser) {
   await page.click('button[type="submit"]');
   await page.waitForURL("**/intake?**", { timeout: 20_000 });
   await waitForStable(page);
+  await assertNoRuntimeError(page, "client_intake_application");
   shots.push({
     key: "client_intake_application",
     title: "End Client: Application For Counselling (Step 1)",
@@ -79,6 +102,7 @@ async function captureOpsJourney(browser) {
 
   await page.goto(`${BASE_URL}/admin/cases`, { waitUntil: "domcontentloaded" });
   await waitForStable(page);
+  await assertNoRuntimeError(page, "ops_case_list");
   shots.push({
     key: "ops_case_list",
     title: "Ops Manager: Case List",
@@ -89,6 +113,7 @@ async function captureOpsJourney(browser) {
 
   await page.goto(`${BASE_URL}/admin/assignments`, { waitUntil: "domcontentloaded" });
   await waitForStable(page);
+  await assertNoRuntimeError(page, "ops_assignment_board");
   shots.push({
     key: "ops_assignment_board",
     title: "Ops Manager: Assignment Dashboard",
@@ -100,13 +125,15 @@ async function captureOpsJourney(browser) {
   const firstCaseCard = page.locator('article[role="button"]').first();
   if (await firstCaseCard.count()) {
     await firstCaseCard.click();
-    await page.waitForSelector('div[role="dialog"]', { timeout: 10_000 });
+    const dialog = page.locator('div[role="dialog"]').first();
+    await dialog.waitFor({ state: "visible", timeout: 10_000 });
     await waitForStable(page);
+    await assertNoRuntimeError(page, "ops_assignment_modal");
     shots.push({
       key: "ops_assignment_modal",
       title: "Ops Manager: Case Modal From Assignment Board",
       fileName: "05-ops-assignment-case-modal.png",
-      path: await saveShot(page, "05-ops-assignment-case-modal.png"),
+      path: await saveLocatorShot(dialog, "05-ops-assignment-case-modal.png"),
       route: "/admin/assignments (modal)",
     });
   }
@@ -116,6 +143,7 @@ async function captureOpsJourney(browser) {
   await openCaseLink.waitFor({ state: "visible", timeout: 15_000 });
   await openCaseLink.click();
   await waitForStable(page);
+  await assertNoRuntimeError(page, "ops_case_detail");
   shots.push({
     key: "ops_case_detail",
     title: "Ops Manager: Case Detail",
@@ -139,6 +167,7 @@ async function captureCounsellorJourney(browser) {
 
   await page.goto(`${BASE_URL}/specialist/sessions`, { waitUntil: "domcontentloaded" });
   await waitForStable(page);
+  await assertNoRuntimeError(page, "counsellor_sessions");
   shots.push({
     key: "counsellor_sessions",
     title: "Counsellor: Upcoming Sessions",
@@ -149,6 +178,7 @@ async function captureCounsellorJourney(browser) {
 
   await page.goto(`${BASE_URL}/specialist/clients`, { waitUntil: "domcontentloaded" });
   await waitForStable(page);
+  await assertNoRuntimeError(page, "counsellor_clients");
   shots.push({
     key: "counsellor_clients",
     title: "Counsellor: My Clients",
@@ -159,6 +189,7 @@ async function captureCounsellorJourney(browser) {
 
   await page.goto(`${BASE_URL}/specialist/availability`, { waitUntil: "domcontentloaded" });
   await waitForStable(page);
+  await assertNoRuntimeError(page, "counsellor_availability");
   shots.push({
     key: "counsellor_availability",
     title: "Counsellor: Availability Calendar",
