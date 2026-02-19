@@ -566,6 +566,8 @@ export function ManualAssignmentBoard({
   }
 
   function renderAssignedCard(caseItem: AssignmentCase, sourceLaneKey: string) {
+    const assignedStartTime = placements[caseItem.id]?.startTime ?? null;
+
     return (
       <article
         key={`${sourceLaneKey}-${caseItem.id}`}
@@ -580,6 +582,9 @@ export function ManualAssignmentBoard({
       >
         <p className="font-semibold">{caseItem.reference}</p>
         <p>{caseItem.participants.map((participant) => participant.fullName).join(" & ")}</p>
+        <p className="mt-1 text-[11px] text-emerald-800/90">
+          {assignedStartTime ? `Session: ${formatDateTime(assignedStartTime)}` : "Session: Time pending"}
+        </p>
       </article>
     );
   }
@@ -690,93 +695,93 @@ export function ManualAssignmentBoard({
       ) : null}
 
       {viewMode === "kanban" ? (
-        <div className="overflow-x-auto pb-3">
-          <div className="flex min-w-max gap-4">
-            <div className="w-[340px] shrink-0 self-start lg:sticky lg:top-4 lg:max-h-[78vh]">
-              {unassignedPanel}
-            </div>
+        <div className="grid gap-4 lg:grid-cols-[340px,minmax(0,1fr)]">
+          <div className="self-start lg:sticky lg:top-4 lg:h-[calc(100vh-7rem)]">{unassignedPanel}</div>
 
-            {specialists.map((specialist) => (
-              <section
-                key={specialist.id}
-                className="w-[340px] shrink-0 rounded-2xl border border-[color:var(--border)] bg-white p-3"
-              >
-                <header className="mb-3">
-                  <h3 className="text-base font-semibold">{specialist.name}</h3>
-                  <p className="text-xs text-[color:var(--muted)]">
-                    {specialist.supportsCouples ? "Supports couples" : "Individual only"}
-                  </p>
-                </header>
+          <div className="overflow-x-auto pb-3">
+            <div className="flex min-w-max gap-4">
+              {specialists.map((specialist) => (
+                <section
+                  key={specialist.id}
+                  className="w-[340px] shrink-0 rounded-2xl border border-[color:var(--border)] bg-white p-3"
+                >
+                  <header className="mb-3">
+                    <h3 className="text-base font-semibold">{specialist.name}</h3>
+                    <p className="text-xs text-[color:var(--muted)]">
+                      {specialist.supportsCouples ? "Supports couples" : "Individual only"}
+                    </p>
+                  </header>
 
-                <div className="space-y-2">
-                  {BLOCKS.map((block) => {
-                    const key = assignmentKey(specialist.id, block);
-                    const laneAssignments = assignments[key] || [];
-                    return (
-                      <div
-                        key={key}
-                        onDragOver={(event) => event.preventDefault()}
-                        onDrop={(event) => {
-                          event.preventDefault();
-                          void handleDrop(specialist.id, block);
-                        }}
-                        className="rounded-xl border border-dashed border-[color:var(--border)] bg-[color:var(--accent-soft)]/45 p-3"
-                      >
-                        <div className="flex items-center justify-between gap-2">
-                          <p className="text-sm font-semibold">
-                            {BLOCK_LABELS[block]}{" "}
-                            <span className="text-xs text-[color:var(--muted)]">
-                              ({BLOCK_WINDOWS[block]})
+                  <div className="space-y-2">
+                    {BLOCKS.map((block) => {
+                      const key = assignmentKey(specialist.id, block);
+                      const laneAssignments = assignments[key] || [];
+                      return (
+                        <div
+                          key={key}
+                          onDragOver={(event) => event.preventDefault()}
+                          onDrop={(event) => {
+                            event.preventDefault();
+                            void handleDrop(specialist.id, block);
+                          }}
+                          className="rounded-xl border border-dashed border-[color:var(--border)] bg-[color:var(--accent-soft)]/45 p-3"
+                        >
+                          <div className="flex items-center justify-between gap-2">
+                            <p className="text-sm font-semibold">
+                              {BLOCK_LABELS[block]}{" "}
+                              <span className="text-xs text-[color:var(--muted)]">
+                                ({BLOCK_WINDOWS[block]})
+                              </span>
+                            </p>
+                            <span className="rounded-full border border-[color:var(--border)] bg-white px-2 py-0.5 text-xs">
+                              {specialist.availability.counts[block]} slots
                             </span>
+                          </div>
+                          <p className="mt-1 text-xs text-[color:var(--muted)]">
+                            Next: {formatDateTime(specialist.availability.next[block])}
                           </p>
-                          <span className="rounded-full border border-[color:var(--border)] bg-white px-2 py-0.5 text-xs">
-                            {specialist.availability.counts[block]} slots
-                          </span>
-                        </div>
-                        <p className="mt-1 text-xs text-[color:var(--muted)]">
-                          Next: {formatDateTime(specialist.availability.next[block])}
-                        </p>
-                        <div className="mt-2 rounded-md border border-[color:var(--border)] bg-white p-2">
-                          <p className="text-[11px] font-semibold uppercase tracking-[1.5px] text-[color:var(--muted)]">
-                            Upcoming Slots
-                          </p>
-                          {specialist.availability.slots[block].length > 0 ? (
-                            <ul className="mt-1 grid grid-cols-1 gap-1">
-                              {specialist.availability.slots[block].map((slot) => (
-                                <li
-                                  key={`${key}-${slot}`}
-                                  className="rounded-md border border-[color:var(--border)] bg-[color:var(--accent-soft)] px-2 py-1 text-[11px] text-[color:var(--cg-ink)]"
-                                >
-                                  {formatSlotLabel(slot)}
-                                </li>
-                              ))}
-                            </ul>
-                          ) : (
-                            <p className="mt-1 text-[11px] text-[color:var(--muted)]">
-                              No upcoming slots in this block.
+                          <div className="mt-2 rounded-md border border-[color:var(--border)] bg-white p-2">
+                            <p className="text-[11px] font-semibold uppercase tracking-[1.5px] text-[color:var(--muted)]">
+                              Upcoming Slots
                             </p>
-                          )}
+                            {specialist.availability.slots[block].length > 0 ? (
+                              <ul className="mt-1 grid grid-cols-1 gap-1">
+                                {specialist.availability.slots[block].map((slot) => (
+                                  <li
+                                    key={`${key}-${slot}`}
+                                    className="rounded-md border border-[color:var(--border)] bg-[color:var(--accent-soft)] px-2 py-1 text-[11px] text-[color:var(--cg-ink)]"
+                                  >
+                                    {formatSlotLabel(slot)}
+                                  </li>
+                                ))}
+                              </ul>
+                            ) : (
+                              <p className="mt-1 text-[11px] text-[color:var(--muted)]">
+                                No upcoming slots in this block.
+                              </p>
+                            )}
+                          </div>
+                          <div className="mt-2 space-y-1">
+                            {laneAssignments.length > 0 ? (
+                              laneAssignments.map((caseItem) => renderAssignedCard(caseItem, key))
+                            ) : (
+                              <p className="rounded-md border border-[color:var(--border)] bg-white px-2 py-1 text-xs text-[color:var(--muted)]">
+                                Drop a case here
+                              </p>
+                            )}
+                          </div>
                         </div>
-                        <div className="mt-2 space-y-1">
-                          {laneAssignments.length > 0 ? (
-                            laneAssignments.map((caseItem) => renderAssignedCard(caseItem, key))
-                          ) : (
-                            <p className="rounded-md border border-[color:var(--border)] bg-white px-2 py-1 text-xs text-[color:var(--muted)]">
-                              Drop a case here
-                            </p>
-                          )}
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              </section>
-            ))}
+                      );
+                    })}
+                  </div>
+                </section>
+              ))}
+            </div>
           </div>
         </div>
       ) : (
         <div className="grid gap-4 xl:grid-cols-[340px,1fr]">
-          <div className="xl:sticky xl:top-4 xl:max-h-[78vh] xl:self-start">{unassignedPanel}</div>
+          <div className="xl:sticky xl:top-4 xl:h-[calc(100vh-7rem)] xl:self-start">{unassignedPanel}</div>
           <div className="space-y-4">
             {specialists.map((specialist) => {
               const specialistCases = assignedCasesBySpecialist[specialist.id] || [];
