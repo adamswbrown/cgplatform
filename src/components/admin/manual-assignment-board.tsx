@@ -586,7 +586,7 @@ export function ManualAssignmentBoard({
 
   const unassignedPanel = (
     <section
-      className={`rounded-2xl border bg-white p-3 ${
+      className={`flex h-full min-h-[260px] flex-col rounded-2xl border bg-white p-3 ${
         draggedCase?.sourceLaneKey
           ? "border-dashed border-[color:var(--cg-ink)] shadow-[inset_0_0_0_1px_var(--cg-ink)]"
           : "border-[color:var(--border)]"
@@ -614,7 +614,7 @@ export function ManualAssignmentBoard({
           ? "Drop here to remove counsellor assignment."
           : "Queue of cases not currently assigned."}
       </p>
-      <div className="space-y-3">
+      <div className="space-y-3 overflow-y-auto pr-1">
         {queue.length === 0 ? (
           <p className="rounded-xl border border-[color:var(--border)] bg-[color:var(--accent-soft)] px-3 py-2 text-sm">
             No unassigned cases waiting.
@@ -692,7 +692,9 @@ export function ManualAssignmentBoard({
       {viewMode === "kanban" ? (
         <div className="overflow-x-auto pb-3">
           <div className="flex min-w-max gap-4">
-            <div className="w-[340px] shrink-0">{unassignedPanel}</div>
+            <div className="w-[340px] shrink-0 self-start lg:sticky lg:top-4 lg:max-h-[78vh]">
+              {unassignedPanel}
+            </div>
 
             {specialists.map((specialist) => (
               <section
@@ -774,7 +776,7 @@ export function ManualAssignmentBoard({
         </div>
       ) : (
         <div className="grid gap-4 xl:grid-cols-[340px,1fr]">
-          <div>{unassignedPanel}</div>
+          <div className="xl:sticky xl:top-4 xl:max-h-[78vh] xl:self-start">{unassignedPanel}</div>
           <div className="space-y-4">
             {specialists.map((specialist) => {
               const specialistCases = assignedCasesBySpecialist[specialist.id] || [];

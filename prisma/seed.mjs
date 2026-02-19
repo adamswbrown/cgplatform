@@ -58,8 +58,8 @@ function normalizeCompletionToken(value) {
     return "";
   }
 
-  if (normalized === "AVAILABILITY_CAPTURED") {
-    return "AVAILABILITY_SUBMISSION";
+  if (normalized === "AVAILABILITY_SUBMISSION") {
+    return "AVAILABILITY_CAPTURED";
   }
 
   return normalized;
@@ -1054,7 +1054,7 @@ async function main() {
       const completeByFormType = new Set([
         "TERMS_AND_CONDITIONS",
         "INTAKE_FORM",
-        "AVAILABILITY_SUBMISSION",
+        "AVAILABILITY_CAPTURED",
       ]);
       const isCompleted = Boolean(completeByFormType.has(resolveStepCompletionToken(step)));
       return {
@@ -1227,7 +1227,7 @@ async function main() {
         "INTAKE_FORM",
         "CONSENT_FORM",
         "AGREEMENT_FORM",
-        "AVAILABILITY_SUBMISSION",
+        "AVAILABILITY_CAPTURED",
       ]);
       const isCompleted = Boolean(completeByFormType.has(resolveStepCompletionToken(step)));
 

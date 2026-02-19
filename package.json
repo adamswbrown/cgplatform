@@ -16,6 +16,7 @@
     "db:migrate": "prisma migrate dev",
     "db:push": "prisma db push",
     "db:seed": "node prisma/seed.mjs",
+    "db:purge-legacy-availability": "node scripts/purge-legacy-availability-submission.mjs",
     "db:studio": "prisma studio"
   },
   "dependencies": {

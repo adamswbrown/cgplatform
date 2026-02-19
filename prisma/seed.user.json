@@ -76,7 +76,7 @@
           "selectedSlots": []
         }
       },
-      "completedFormTypes": ["INTAKE_FORM", "AVAILABILITY_SUBMISSION"],
+      "completedFormTypes": ["INTAKE_FORM", "AVAILABILITY_CAPTURED"],
       "documents": [
         {
           "code": "TERMS_AND_CONDITIONS",
@@ -133,7 +133,7 @@
           "selectedSlots": []
         }
       },
-      "completedFormTypes": ["INTAKE_FORM", "AVAILABILITY_SUBMISSION"]
+      "completedFormTypes": ["INTAKE_FORM", "AVAILABILITY_CAPTURED"]
     },
     {
       "reference": "CASE-USER-2003",
@@ -175,7 +175,7 @@
           "selectedSlots": []
         }
       },
-      "completedFormTypes": ["INTAKE_FORM", "AVAILABILITY_SUBMISSION"]
+      "completedFormTypes": ["INTAKE_FORM", "AVAILABILITY_CAPTURED"]
     },
     {
       "reference": "CASE-USER-2004",
@@ -229,7 +229,7 @@
         "INTAKE_FORM",
         "CONSENT_FORM",
         "AGREEMENT_FORM",
-        "AVAILABILITY_SUBMISSION"
+        "AVAILABILITY_CAPTURED"
       ]
     },
     {

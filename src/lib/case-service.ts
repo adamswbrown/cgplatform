@@ -4511,34 +4511,7 @@ export async function ingestAvailabilitySubmission(input: {
       where: {
         caseId: refreshedCase.id,
         step: {
-          OR: [
-            {
-              stepCode: AVAILABILITY_CAPTURED_STEP_CODE,
-            },
-            {
-              AND: [
-                {
-                  type: "FORM",
-                },
-                {
-                  OR: [
-                    {
-                      formType: {
-                        equals: AVAILABILITY_SUBMISSION_FORM_TYPE,
-                        mode: "insensitive",
-                      },
-                    },
-                    {
-                      name: {
-                        equals: AVAILABILITY_SUBMISSION_FORM_TYPE,
-                        mode: "insensitive",
-                      },
-                    },
-                  ],
-                },
-              ],
-            },
-          ],
+          stepCode: AVAILABILITY_CAPTURED_STEP_CODE,
         },
       },
       include: {
@@ -4562,7 +4535,7 @@ export async function ingestAvailabilitySubmission(input: {
           metadata: {
             ...(input.metadata || {}),
             source,
-            formType: AVAILABILITY_SUBMISSION_FORM_TYPE,
+            stepCode: AVAILABILITY_CAPTURED_STEP_CODE,
             timezone,
             ingestedAt: submittedAt.toISOString(),
             participantIdentifier: normalizedIdentifier,
@@ -4724,34 +4697,7 @@ export async function ingestAvailabilityPreferenceSubmission(input: {
       where: {
         caseId: caseRecord.id,
         step: {
-          OR: [
-            {
-              stepCode: AVAILABILITY_CAPTURED_STEP_CODE,
-            },
-            {
-              AND: [
-                {
-                  type: "FORM",
-                },
-                {
-                  OR: [
-                    {
-                      formType: {
-                        equals: AVAILABILITY_SUBMISSION_FORM_TYPE,
-                        mode: "insensitive",
-                      },
-                    },
-                    {
-                      name: {
-                        equals: AVAILABILITY_SUBMISSION_FORM_TYPE,
-                        mode: "insensitive",
-                      },
-                    },
-                  ],
-                },
-              ],
-            },
-          ],
+          stepCode: AVAILABILITY_CAPTURED_STEP_CODE,
         },
       },
       include: {
@@ -4792,7 +4738,7 @@ export async function ingestAvailabilityPreferenceSubmission(input: {
           metadata: {
             ...(input.metadata || {}),
             source,
-            formType: AVAILABILITY_SUBMISSION_FORM_TYPE,
+            stepCode: AVAILABILITY_CAPTURED_STEP_CODE,
             ingestedAt: submittedAt.toISOString(),
             mode: "manual_assignment_preferences",
             location: input.location || null,
