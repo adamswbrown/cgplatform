@@ -1,0 +1,78 @@
+{
+  "generatedAt": "2026-02-19T12:14:34.644Z",
+  "baseUrl": "http://127.0.0.1:3001",
+  "screenshots": [
+    {
+      "key": "client_pin_entry",
+      "title": "End Client: Secure Intake PIN Entry",
+      "fileName": "01-client-pin-entry.png",
+      "path": "/Users/adambrown/Developer/codex-cgplatform/docs/screenshots/personas/01-client-pin-entry.png",
+      "route": "/intake/access/seed-intake-primary-2001",
+      "relativePath": "docs/screenshots/personas/01-client-pin-entry.png"
+    },
+    {
+      "key": "client_intake_application",
+      "title": "End Client: Application For Counselling (Step 1)",
+      "fileName": "02-client-intake-application-step-1.png",
+      "path": "/Users/adambrown/Developer/codex-cgplatform/docs/screenshots/personas/02-client-intake-application-step-1.png",
+      "route": "/intake?accessKey=...",
+      "relativePath": "docs/screenshots/personas/02-client-intake-application-step-1.png"
+    },
+    {
+      "key": "ops_case_list",
+      "title": "Ops Manager: Case List",
+      "fileName": "03-ops-case-list.png",
+      "path": "/Users/adambrown/Developer/codex-cgplatform/docs/screenshots/personas/03-ops-case-list.png",
+      "route": "/admin/cases",
+      "relativePath": "docs/screenshots/personas/03-ops-case-list.png"
+    },
+    {
+      "key": "ops_assignment_board",
+      "title": "Ops Manager: Assignment Dashboard",
+      "fileName": "04-ops-assignment-dashboard.png",
+      "path": "/Users/adambrown/Developer/codex-cgplatform/docs/screenshots/personas/04-ops-assignment-dashboard.png",
+      "route": "/admin/assignments",
+      "relativePath": "docs/screenshots/personas/04-ops-assignment-dashboard.png"
+    },
+    {
+      "key": "ops_assignment_modal",
+      "title": "Ops Manager: Case Modal From Assignment Board",
+      "fileName": "05-ops-assignment-case-modal.png",
+      "path": "/Users/adambrown/Developer/codex-cgplatform/docs/screenshots/personas/05-ops-assignment-case-modal.png",
+      "route": "/admin/assignments (modal)",
+      "relativePath": "docs/screenshots/personas/05-ops-assignment-case-modal.png"
+    },
+    {
+      "key": "ops_case_detail",
+      "title": "Ops Manager: Case Detail",
+      "fileName": "06-ops-case-detail.png",
+      "path": "/Users/adambrown/Developer/codex-cgplatform/docs/screenshots/personas/06-ops-case-detail.png",
+      "route": "/admin/cases/:id",
+      "relativePath": "docs/screenshots/personas/06-ops-case-detail.png"
+    },
+    {
+      "key": "counsellor_sessions",
+      "title": "Counsellor: Upcoming Sessions",
+      "fileName": "07-counsellor-upcoming-sessions.png",
+      "path": "/Users/adambrown/Developer/codex-cgplatform/docs/screenshots/personas/07-counsellor-upcoming-sessions.png",
+      "route": "/specialist/sessions",
+      "relativePath": "docs/screenshots/personas/07-counsellor-upcoming-sessions.png"
+    },
+    {
+      "key": "counsellor_clients",
+      "title": "Counsellor: My Clients",
+      "fileName": "08-counsellor-clients.png",
+      "path": "/Users/adambrown/Developer/codex-cgplatform/docs/screenshots/personas/08-counsellor-clients.png",
+      "route": "/specialist/clients",
+      "relativePath": "docs/screenshots/personas/08-counsellor-clients.png"
+    },
+    {
+      "key": "counsellor_availability",
+      "title": "Counsellor: Availability Calendar",
+      "fileName": "09-counsellor-availability-calendar.png",
+      "path": "/Users/adambrown/Developer/codex-cgplatform/docs/screenshots/personas/09-counsellor-availability-calendar.png",
+      "route": "/specialist/availability",
+      "relativePath": "docs/screenshots/personas/09-counsellor-availability-calendar.png"
+    }
+  ]
+}

@@ -235,6 +235,12 @@ npm run dev
 SCHEDULING_ASSIGNMENT_MODE=auto npm run dev
 ```
 
+5. Optional: capture persona UI screenshots (requires app running locally)
+
+```bash
+PLAYWRIGHT_BASE_URL=http://127.0.0.1:3001 npm run screenshots:personas
+```
+
 ## Demo Credentials
 
 - Ops: `ops@demo.local / password123`
@@ -285,6 +291,7 @@ Specialist:
 - `/specialist/sessions`
 - `/specialist/sessions/[id]`
 - `/specialist/clients`
+- `/specialist/availability`
 
 ## API Surface
 
@@ -345,6 +352,27 @@ Specialist:
 1. See only assigned work in `My Sessions` and `My Clients`.
 2. Open session briefing pages with participants, case notes, submitted documents, flags, and previous sessions.
 3. Deliver counselling sessions according to scheduled bookings and case lifecycle state.
+
+## Persona UI Screenshots
+
+Full gallery with all captured stages:
+
+- [`docs/PERSONA_UI_SCREENSHOTS.md`](docs/PERSONA_UI_SCREENSHOTS.md)
+- Raw files: [`docs/screenshots/personas`](docs/screenshots/personas)
+
+Preview set:
+
+End Client - secure intake PIN access
+
+![End Client Secure Intake PIN](docs/screenshots/personas/01-client-pin-entry.png)
+
+Ops Manager - assignment dashboard
+
+![Ops Assignment Dashboard](docs/screenshots/personas/04-ops-assignment-dashboard.png)
+
+Counsellor - upcoming sessions
+
+![Counsellor Upcoming Sessions](docs/screenshots/personas/07-counsellor-upcoming-sessions.png)
 
 ## System Flowchart (Mermaid)
 

@@ -5,6 +5,8 @@ Workspace: `/Users/adambrown/Developer/codex-cgplatform`
 Evidence bundle: `/Users/adambrown/Developer/codex-cgplatform/docs/e2e-evidence/2026-02-14T12-09-31Z`  
 Latest symlink: `/Users/adambrown/Developer/codex-cgplatform/docs/e2e-evidence/latest`
 
+Persona UI screenshot gallery: [`docs/PERSONA_UI_SCREENSHOTS.md`](./PERSONA_UI_SCREENSHOTS.md)
+
 ## Commands Executed
 
 ```bash
