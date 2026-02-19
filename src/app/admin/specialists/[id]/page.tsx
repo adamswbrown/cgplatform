@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { UserRole } from "@prisma/client";
 import { updateSpecialistProfileAction } from "@/app/actions";
 import { AuthenticatedShell } from "@/components/authenticated-shell";
+import { getOperationalSettings } from "@/lib/admin-settings";
 import { requirePageUser } from "@/lib/auth";
 import { getSpecialistProfileForOps } from "@/lib/case-service";
 import { formatDateTime, formatStatus } from "@/lib/format";
@@ -20,7 +21,10 @@ export default async function SpecialistProfilePage({
   const { id } = await params;
   const query = await searchParams;
 
-  const specialist = await getSpecialistProfileForOps(id);
+  const [specialist, operationalSettings] = await Promise.all([
+    getSpecialistProfileForOps(id),
+    getOperationalSettings(),
+  ]);
 
   if (!specialist) {
     notFound();
@@ -29,6 +33,11 @@ export default async function SpecialistProfilePage({
   const error = typeof query.error === "string" ? query.error : null;
   const updated = typeof query.updated === "string";
   const now = new Date();
+  const usesCalCom = operationalSettings.schedulingEngineType === "calcom";
+  const calSectionMutedClass = usesCalCom ? "" : "opacity-60";
+  const calFieldClass = `w-full rounded-md border border-[color:var(--border)] px-2 py-2 text-sm ${
+    usesCalCom ? "" : "bg-slate-50 text-[color:var(--muted)]"
+  }`;
 
   const upcomingSessions = specialist.sessions
     .filter((session) => session.providerStartTime >= now)
@@ -41,7 +50,7 @@ export default async function SpecialistProfilePage({
   return (
     <AuthenticatedShell
       title={`Counsellor Profile: ${specialist.name}`}
-      subtitle="Operations profile view for assignment fit and Cal.com scheduling mappings."
+      subtitle="Operations profile view for assignment fit and scheduler mappings."
       userName={user.name}
       role={user.role}
       navItems={[
@@ -161,10 +170,18 @@ export default async function SpecialistProfilePage({
               </p>
             </div>
 
-            <div className="rounded-xl border border-[color:var(--border)] p-4 md:col-span-2">
+            <div
+              className={`rounded-xl border border-[color:var(--border)] p-4 md:col-span-2 ${calSectionMutedClass}`}
+            >
               <p className="text-xs font-semibold uppercase tracking-wide text-[color:var(--muted)]">
                 Cal.com mappings
               </p>
+              {!usesCalCom ? (
+                <p className="mt-1 text-xs text-[color:var(--muted)]">
+                  Engine is set to <strong>{operationalSettings.schedulingEngineType}</strong>;
+                  Cal.com fields are stored but inactive.
+                </p>
+              ) : null}
               <p className="mt-2 text-sm">User ID: {specialist.calUserId}</p>
               <p className="text-sm">Individual Event Type: {specialist.calIndividualEventTypeId}</p>
               <p className="text-sm">Couples Event Type: {specialist.calCouplesEventTypeId || "-"}</p>
@@ -242,7 +259,7 @@ export default async function SpecialistProfilePage({
                   name="calUserId"
                   defaultValue={specialist.calUserId}
                   required
-                  className="w-full rounded-md border border-[color:var(--border)] px-2 py-2 text-sm"
+                  className={calFieldClass}
                 />
               </div>
 
@@ -255,7 +272,7 @@ export default async function SpecialistProfilePage({
                   name="calIndividualEventTypeId"
                   defaultValue={specialist.calIndividualEventTypeId}
                   required
-                  className="w-full rounded-md border border-[color:var(--border)] px-2 py-2 text-sm"
+                  className={calFieldClass}
                 />
               </div>
 
@@ -267,7 +284,7 @@ export default async function SpecialistProfilePage({
                   id="calCouplesEventTypeId"
                   name="calCouplesEventTypeId"
                   defaultValue={specialist.calCouplesEventTypeId || ""}
-                  className="w-full rounded-md border border-[color:var(--border)] px-2 py-2 text-sm"
+                  className={calFieldClass}
                 />
               </div>
 

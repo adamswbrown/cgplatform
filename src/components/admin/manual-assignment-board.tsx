@@ -566,7 +566,14 @@ export function ManualAssignmentBoard({
   }
 
   function renderAssignedCard(caseItem: AssignmentCase, sourceLaneKey: string) {
-    const assignedStartTime = placements[caseItem.id]?.startTime ?? null;
+    const placement = placements[caseItem.id];
+    const assignedStartTime = placement?.startTime ?? null;
+    const assignedBlock = placement?.timeBlock ?? null;
+    const hasExplicitPreference = caseItem.timePreferences.length > 0;
+    const matchesPreference =
+      !assignedBlock ||
+      !hasExplicitPreference ||
+      caseItem.timePreferences.includes(assignedBlock);
 
     return (
       <article
@@ -583,8 +590,20 @@ export function ManualAssignmentBoard({
         <p className="font-semibold">{caseItem.reference}</p>
         <p>{caseItem.participants.map((participant) => participant.fullName).join(" & ")}</p>
         <p className="mt-1 text-[11px] text-emerald-800/90">
-          {assignedStartTime ? `Session: ${formatDateTime(assignedStartTime)}` : "Session: Time pending"}
+          Preference: {formatCasePreference(caseItem.timePreferences)}
         </p>
+        <p className="mt-1 text-[11px] text-emerald-800/90">
+          {assignedStartTime
+            ? `Session: ${formatDateTime(assignedStartTime)}`
+            : assignedBlock
+              ? `Session block: ${BLOCK_LABELS[assignedBlock]}`
+              : "Session: Time pending"}
+        </p>
+        {!matchesPreference ? (
+          <p className="mt-1 rounded border border-amber-300 bg-amber-50 px-1.5 py-0.5 text-[11px] text-amber-800">
+            Outside preferred time block
+          </p>
+        ) : null}
       </article>
     );
   }
@@ -981,6 +1000,18 @@ export function ManualAssignmentBoard({
                   Availability Preference
                 </p>
                 <p className="mt-2 text-sm">{formatCasePreference(selectedCase.timePreferences)}</p>
+                <p className="mt-1 text-xs text-[color:var(--muted)]">
+                  Assigned block:{" "}
+                  {placements[selectedCase.id]?.timeBlock
+                    ? BLOCK_LABELS[placements[selectedCase.id]!.timeBlock]
+                    : "Not set"}
+                </p>
+                <p className="mt-1 text-xs text-[color:var(--muted)]">
+                  Assigned time:{" "}
+                  {placements[selectedCase.id]?.startTime
+                    ? formatDateTime(placements[selectedCase.id]!.startTime)
+                    : "Not set"}
+                </p>
               </div>
             </div>
 

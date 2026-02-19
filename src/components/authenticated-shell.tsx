@@ -27,7 +27,6 @@ const OPS_NAV_PRIORITY: string[] = [
   "/admin/assignments",
   "/admin/clients",
   "/admin/specialists",
-  "/admin/workflows",
   "/intake",
 ];
 
@@ -37,8 +36,20 @@ const SPECIALIST_NAV_PRIORITY: string[] = [
   "/specialist/availability",
 ];
 
+const OPS_SETTINGS_NAV_PRIORITY: string[] = [
+  "/admin/settings",
+  "/admin/settings/operations",
+  "/admin/settings/intake",
+  "/admin/workflows",
+];
+
 function isSettingsNavItem(item: NavItem) {
-  return item.href.includes("/settings") || item.label.toLowerCase().includes("settings");
+  return (
+    item.href.includes("/settings") ||
+    item.label.toLowerCase().includes("settings") ||
+    item.href.startsWith("/admin/workflows") ||
+    item.label.toLowerCase().includes("workflow")
+  );
 }
 
 function navPriority(role: UserRole, href: string) {
@@ -79,10 +90,34 @@ function defaultSettingsNavItems(role: UserRole): NavItem[] {
   }
 
   return [
-    { href: "/admin/settings", label: "Settings" },
     { href: "/admin/settings/operations", label: "Operational Settings" },
     { href: "/admin/settings/intake", label: "Intake Settings" },
+    { href: "/admin/workflows", label: "Workflows" },
   ];
+}
+
+function shouldExcludeFromSettingsMenu(item: NavItem) {
+  return item.href === "/admin/settings";
+}
+
+function settingsNavPriority(role: UserRole, href: string) {
+  if (role !== UserRole.OPS) {
+    return 999;
+  }
+
+  const index = OPS_SETTINGS_NAV_PRIORITY.findIndex((prefix) => href.startsWith(prefix));
+  return index === -1 ? 999 : index;
+}
+
+function normalizeSettingsNavItems(role: UserRole, navItems: NavItem[]) {
+  return [...navItems].sort((a, b) => {
+    const priorityDelta = settingsNavPriority(role, a.href) - settingsNavPriority(role, b.href);
+    if (priorityDelta !== 0) {
+      return priorityDelta;
+    }
+
+    return a.label.localeCompare(b.label);
+  });
 }
 
 function navGroupLabel(role: UserRole, href: string) {
@@ -170,7 +205,8 @@ export function AuthenticatedShell({
   const settingsNavItems = dedupeNavItems([
     ...orderedNav.filter(isSettingsNavItem),
     ...defaultSettingsNavItems(role),
-  ]);
+  ]).filter((item) => !shouldExcludeFromSettingsMenu(item));
+  const orderedSettingsNavItems = normalizeSettingsNavItems(role, settingsNavItems);
   const primaryNavItems = orderedNav.filter((item) => !isSettingsNavItem(item));
   const primaryNavGroups = groupNavItems(role, primaryNavItems);
 
@@ -219,7 +255,7 @@ export function AuthenticatedShell({
                   </p>
 
                   <div className="mt-3 space-y-1">
-                    {settingsNavItems.map((item) => (
+                    {orderedSettingsNavItems.map((item) => (
                       <Link
                         key={item.href}
                         href={item.href}

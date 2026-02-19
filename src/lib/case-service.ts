@@ -2289,6 +2289,192 @@ export async function listClientsForOps() {
   });
 }
 
+export async function getClientDetailsForOps(clientId: string) {
+  return db.client.findUnique({
+    where: {
+      id: clientId,
+    },
+    select: {
+      id: true,
+      firstName: true,
+      lastName: true,
+      email: true,
+      phone: true,
+      createdAt: true,
+      updatedAt: true,
+      availabilityWindows: {
+        where: {
+          active: true,
+        },
+        orderBy: {
+          startTime: "asc",
+        },
+        select: {
+          id: true,
+          caseId: true,
+          startTime: true,
+          endTime: true,
+          timezone: true,
+          source: true,
+          submittedAt: true,
+          case: {
+            select: {
+              id: true,
+              reference: true,
+            },
+          },
+        },
+      },
+      formAccessPins: {
+        orderBy: {
+          createdAt: "desc",
+        },
+        take: 25,
+        select: {
+          id: true,
+          formType: true,
+          formPath: true,
+          accessKey: true,
+          expiresAt: true,
+          lastVerifiedAt: true,
+          revokedAt: true,
+          createdAt: true,
+          case: {
+            select: {
+              id: true,
+              reference: true,
+            },
+          },
+          issuedBy: {
+            select: {
+              name: true,
+              email: true,
+            },
+          },
+        },
+      },
+      participants: {
+        orderBy: {
+          case: {
+            updatedAt: "desc",
+          },
+        },
+        select: {
+          role: true,
+          case: {
+            select: {
+              id: true,
+              reference: true,
+              status: true,
+              counsellingType: true,
+              intakeSource: true,
+              intakeReceivedAt: true,
+              intakeFormData: true,
+              notes: true,
+              intakeReviewNotes: true,
+              flags: true,
+              assignedSpecialist: {
+                select: {
+                  id: true,
+                  name: true,
+                  email: true,
+                },
+              },
+              caseWorkflowTemplate: {
+                select: {
+                  id: true,
+                  name: true,
+                  counsellingType: true,
+                },
+              },
+              workflowStates: {
+                where: {
+                  status: "PENDING",
+                  step: {
+                    required: true,
+                    blocksScheduling: true,
+                  },
+                },
+                select: {
+                  id: true,
+                  stepId: true,
+                  step: {
+                    select: {
+                      name: true,
+                      type: true,
+                      formType: true,
+                    },
+                  },
+                },
+                orderBy: {
+                  step: {
+                    sortOrder: "asc",
+                  },
+                },
+              },
+              sessions: {
+                orderBy: {
+                  providerStartTime: "asc",
+                },
+                select: {
+                  id: true,
+                  status: true,
+                  providerStartTime: true,
+                  providerEndTime: true,
+                  providerType: true,
+                  providerStatus: true,
+                  specialist: {
+                    select: {
+                      id: true,
+                      name: true,
+                    },
+                  },
+                },
+              },
+              participants: {
+                select: {
+                  role: true,
+                  client: {
+                    select: {
+                      id: true,
+                      firstName: true,
+                      lastName: true,
+                      email: true,
+                      phone: true,
+                    },
+                  },
+                },
+                orderBy: {
+                  role: "asc",
+                },
+              },
+              documents: {
+                orderBy: {
+                  sentAt: "asc",
+                },
+                select: {
+                  id: true,
+                  status: true,
+                  required: true,
+                  sentAt: true,
+                  completedAt: true,
+                  template: {
+                    select: {
+                      id: true,
+                      code: true,
+                      name: true,
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+  });
+}
+
 export async function listClientsForSpecialist(specialistId: string) {
   return db.client.findMany({
     where: {
@@ -3620,6 +3806,62 @@ export async function removeSpecialistAvailabilitySlot(input: {
           availabilityType: window.availabilityType,
           reason: input.reason?.trim() || null,
         },
+      },
+    });
+
+    return updated;
+  });
+}
+
+export async function updateCaseIntakeReviewNotes(input: {
+  caseId: string;
+  notes?: string;
+  actorUserId: string;
+}) {
+  const normalizedNotes = input.notes?.trim() || null;
+
+  return db.$transaction(async (tx) => {
+    const existing = await tx.case.findUnique({
+      where: {
+        id: input.caseId,
+      },
+      select: {
+        id: true,
+        reference: true,
+        intakeReviewNotes: true,
+      },
+    });
+
+    if (!existing) {
+      throw new DomainError("Case not found.", 404);
+    }
+
+    if ((existing.intakeReviewNotes || null) === normalizedNotes) {
+      return existing;
+    }
+
+    const updated = await tx.case.update({
+      where: {
+        id: existing.id,
+      },
+      data: {
+        intakeReviewNotes: normalizedNotes,
+      },
+      select: {
+        id: true,
+        reference: true,
+        intakeReviewNotes: true,
+      },
+    });
+
+    await createAuditLog(tx, {
+      caseId: existing.id,
+      userId: input.actorUserId,
+      action: "CASE_INTAKE_REVIEW_NOTES_UPDATED",
+      details: {
+        caseReference: existing.reference,
+        before: existing.intakeReviewNotes || null,
+        after: updated.intakeReviewNotes || null,
       },
     });
 

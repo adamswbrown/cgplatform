@@ -9,6 +9,7 @@ import {
   revokeFormPinAction,
   overrideAssignmentAction,
   transitionCaseAction,
+  updateCaseIntakeReviewNotesAction,
 } from "@/app/actions";
 import { AuthenticatedShell } from "@/components/authenticated-shell";
 import { FormPinRoutingFields } from "@/components/forms/form-pin-routing-fields";
@@ -30,7 +31,7 @@ type CaseDetailPageProps = {
 
 type IntakeFieldRow = {
   path: string;
-  value: string;
+  rawValue: unknown;
 };
 
 type CasePanel = "assignment" | "intake" | "forms" | "history";
@@ -86,6 +87,172 @@ function formatIntakeScalar(value: unknown): string {
   return String(value);
 }
 
+const INTAKE_FIELD_LABELS: Record<string, string> = {
+  participantType: "Application type",
+  counsellingType: "Counselling type",
+  requestedDurationMinutes: "Requested session length (minutes)",
+  "primary.title": "Primary participant title",
+  "primary.firstName": "Primary first name",
+  "primary.lastName": "Primary last name",
+  "primary.dateOfBirth": "Primary date of birth",
+  "primary.gender": "Primary gender",
+  "primary.email": "Primary email",
+  "primary.mainPhone": "Primary main phone",
+  "primary.secondPhone": "Primary second phone",
+  "primary.addressLine1": "Primary address line 1",
+  "primary.addressLine2": "Primary address line 2",
+  "primary.city": "Primary city/town",
+  "primary.county": "Primary county",
+  "primary.postcode": "Primary postcode",
+  "primary.countryIfNotUk": "Primary country (if not UK)",
+  "primary.churchConnection": "Church connection",
+  "primary.leadershipRole": "Church leadership role",
+  "primary.heardAbout": "How they heard about us",
+  "primary.heardAboutOtherDetail": "How they heard about us (other detail)",
+  "primary.contactPreferences.contactMainPhone": "Contact preference: main phone",
+  "primary.contactPreferences.leaveVoicemailMainPhone": "Contact preference: voicemail on main phone",
+  "primary.contactPreferences.contactSecondPhone": "Contact preference: second phone",
+  "primary.contactPreferences.leaveVoicemailSecondPhone":
+    "Contact preference: voicemail on second phone",
+  "primary.contactPreferences.contactEmail": "Contact preference: email",
+  "primary.emergencyContactFirstName": "Emergency contact first name",
+  "primary.emergencyContactLastName": "Emergency contact last name",
+  "primary.emergencyRelationship": "Emergency contact relationship",
+  "primary.emergencyPhone": "Emergency contact phone",
+  "primary.gpSurgeryName": "GP surgery name",
+  "primary.gpSurgeryPhone": "GP surgery phone",
+  "primary.gpDoctorName": "GP doctor name",
+  "secondary.title": "Secondary participant title",
+  "secondary.firstName": "Secondary first name",
+  "secondary.lastName": "Secondary last name",
+  "secondary.dateOfBirth": "Secondary date of birth",
+  "secondary.gender": "Secondary gender",
+  "secondary.email": "Secondary email",
+  "secondary.mainPhone": "Secondary main phone",
+  "presenting.mainIssue": "Main presenting issue",
+  "presenting.otherDetails": "Presenting issue (other detail)",
+  "presenting.issueDuration": "How long issue has affected participant(s)",
+  "presenting.previousSupport": "Previous support received",
+  "presenting.previousSupportDetails": "Previous support details",
+  "presenting.suicidalThoughtsRecently": "Recent suicidal thoughts",
+  "presenting.suicidalThoughtsDetails": "Recent suicidal thoughts details",
+  "presenting.attemptedSuicide": "Attempted suicide history",
+  "presenting.attemptedSuicideDetails": "Attempted suicide details",
+  "availability.location": "Preferred location",
+  "availability.includeOnline": "Online sessions acceptable",
+  "availability.notes": "Availability notes",
+  "availability.timePreferences[]": "Preferred time block",
+  "availability.selectedSlots[]": "Selected availability slot",
+  "availability.selectedSlots[].startTime": "Selected slot start time",
+  "availability.selectedSlots[].endTime": "Selected slot end time",
+  "consent.signatureType": "Consent signature type",
+  "consent.signedAt": "Consent signed at",
+  "consent.signature": "Consent signature",
+};
+
+function normalizeIntakePath(path: string) {
+  return path.replace(/\[\d+\]/g, "[]");
+}
+
+function extractPathIndices(path: string) {
+  return Array.from(path.matchAll(/\[(\d+)\]/g)).map((match) => Number(match[1]));
+}
+
+function formatLabelToken(token: string) {
+  const withSpaces = token
+    .replace(/\[\d+\]/g, "")
+    .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+    .replace(/_/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  if (!withSpaces) {
+    return token;
+  }
+
+  return withSpaces
+    .split(" ")
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ")
+    .replace(/\bGp\b/g, "GP")
+    .replace(/\bUk\b/g, "UK");
+}
+
+function formatIntakeFieldLabel(path: string) {
+  const normalizedPath = normalizeIntakePath(path);
+  const mapped = INTAKE_FIELD_LABELS[normalizedPath];
+  const indices = extractPathIndices(path);
+
+  if (mapped) {
+    if (indices.length === 0) {
+      return mapped;
+    }
+    return `${mapped} #${indices.map((index) => index + 1).join(".")}`;
+  }
+
+  return normalizedPath.split(".").map(formatLabelToken).join(" > ");
+}
+
+function formatIntakeFieldValue(path: string, rawValue: unknown) {
+  if (Array.isArray(rawValue)) {
+    if (rawValue.length === 0) {
+      return "No entries";
+    }
+    return JSON.stringify(rawValue);
+  }
+
+  if (rawValue && typeof rawValue === "object") {
+    const entries = Object.keys(rawValue as Record<string, unknown>);
+    if (entries.length === 0) {
+      return "No data";
+    }
+    return JSON.stringify(rawValue);
+  }
+
+  if (typeof rawValue === "string") {
+    const value = rawValue.trim();
+    if (!value) {
+      return "(empty)";
+    }
+
+    if (normalizeIntakePath(path) === "consent.signature") {
+      return `Captured signature (${value.length} chars)`;
+    }
+
+    if (value === "yes" || value === "no") {
+      return value === "yes" ? "Yes" : "No";
+    }
+
+    if (value === "prefer_not_to_say") {
+      return "Prefer not to say";
+    }
+
+    if (value === "single") {
+      return "Individual";
+    }
+
+    if (value === "couple") {
+      return "Couple";
+    }
+
+    if (value.includes("_")) {
+      return formatStatus(value.toUpperCase());
+    }
+
+    return value;
+  }
+
+  if (typeof rawValue === "boolean") {
+    return rawValue ? "Yes" : "No";
+  }
+
+  if (rawValue === null) {
+    return "Not provided";
+  }
+
+  return formatIntakeScalar(rawValue);
+}
+
 function flattenIntakeFields(
   value: unknown,
   path = "",
@@ -95,7 +262,7 @@ function flattenIntakeFields(
     if (!path) {
       rows.push({
         path: "(root)",
-        value: "No intake payload stored.",
+        rawValue: "No intake payload stored.",
       });
     }
     return rows;
@@ -104,7 +271,7 @@ function flattenIntakeFields(
   if (value === null || typeof value !== "object") {
     rows.push({
       path: path || "(root)",
-      value: formatIntakeScalar(value),
+      rawValue: value,
     });
     return rows;
   }
@@ -113,7 +280,7 @@ function flattenIntakeFields(
     if (value.length === 0) {
       rows.push({
         path: path || "(root)",
-        value: "[]",
+        rawValue: [],
       });
       return rows;
     }
@@ -132,7 +299,7 @@ function flattenIntakeFields(
   if (entries.length === 0) {
     rows.push({
       path: path || "(root)",
-      value: "{}",
+      rawValue: {},
     });
     return rows;
   }
@@ -186,6 +353,7 @@ export default async function CaseDetailPage({ params, searchParams }: CaseDetai
     typeof query.pinRevokedRecipient === "string" ? query.pinRevokedRecipient : null;
   const pinRevokedAt = typeof query.pinRevokedAt === "string" ? query.pinRevokedAt : null;
   const pinRevokedAlready = query.pinRevokedAlready === "1";
+  const intakeNotesSaved = query.intakeNotesSaved === "1";
   const panelHref = (panel: CasePanel) => `/admin/cases/${caseItem.id}?panel=${panel}`;
   const redirectTo = panelHref(activePanel);
   const now = new Date();
@@ -649,6 +817,41 @@ export default async function CaseDetailPage({ params, searchParams }: CaseDetai
             {caseItem.intakeReceivedAt ? ` • Received: ${formatDateTime(caseItem.intakeReceivedAt)}` : ""}
           </p>
 
+          {intakeNotesSaved ? (
+            <p className="mt-3 rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-800">
+              Intake review notes saved.
+            </p>
+          ) : null}
+
+          <form
+            action={updateCaseIntakeReviewNotesAction}
+            className="mt-3 rounded-lg border border-[color:var(--border)] bg-white p-3"
+          >
+            <input type="hidden" name="caseId" value={caseItem.id} />
+            <input type="hidden" name="redirectTo" value={panelHref("intake")} />
+
+            <label htmlFor="intakeReviewNotes" className="block text-xs font-semibold uppercase tracking-wide text-[color:var(--muted)]">
+              Intake Review Notes (Ops)
+            </label>
+            <p className="mt-1 text-xs text-[color:var(--muted)]">
+              Internal notes for reviewing this intake submission. Not shown to clients.
+            </p>
+            <textarea
+              id="intakeReviewNotes"
+              name="notes"
+              defaultValue={caseItem.intakeReviewNotes || ""}
+              rows={4}
+              placeholder="Add your intake review summary, risks, and next actions..."
+              className="mt-2 w-full rounded-md border border-[color:var(--border)] px-3 py-2 text-sm"
+            />
+            <button
+              type="submit"
+              className="mt-2 rounded-md border border-[color:var(--border)] px-3 py-2 text-xs font-semibold uppercase tracking-wide hover:bg-[color:var(--accent-soft)]"
+            >
+              Save Intake Notes
+            </button>
+          </form>
+
           <div className="mt-3 max-h-[32rem] overflow-auto rounded-lg border border-[color:var(--border)]">
             <table className="min-w-full divide-y divide-[color:var(--border)] text-xs">
               <thead className="bg-slate-50 text-left">
@@ -660,8 +863,15 @@ export default async function CaseDetailPage({ params, searchParams }: CaseDetai
               <tbody className="divide-y divide-[color:var(--border)]">
                 {intakeFieldRows.map((row, index) => (
                   <tr key={`${row.path}:${index}`}>
-                    <td className="whitespace-nowrap px-3 py-2 font-medium">{row.path}</td>
-                    <td className="px-3 py-2 whitespace-pre-wrap break-words">{row.value}</td>
+                    <td className="px-3 py-2">
+                      <p className="font-medium">{formatIntakeFieldLabel(row.path)}</p>
+                      <p className="mt-0.5 font-mono text-[11px] text-[color:var(--muted)]">
+                        {row.path}
+                      </p>
+                    </td>
+                    <td className="px-3 py-2 whitespace-pre-wrap break-words">
+                      {formatIntakeFieldValue(row.path, row.rawValue)}
+                    </td>
                   </tr>
                 ))}
               </tbody>

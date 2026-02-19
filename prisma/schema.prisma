@@ -89,6 +89,7 @@ model Case {
   intakeExternalId     String?
   intakeReceivedAt     DateTime?
   intakeFormData       Json?
+  intakeReviewNotes    String?
   consentSignedAt      DateTime?
   consentSignature     String?
   consentSignatureType String?

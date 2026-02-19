@@ -59,7 +59,9 @@ export default async function AdminClientsPage() {
                   return (
                     <tr key={client.id} className="align-top hover:bg-slate-50">
                       <td className="px-4 py-3 font-medium">
-                        {client.firstName} {client.lastName}
+                        <Link href={`/admin/clients/${client.id}`} className="underline">
+                          {client.firstName} {client.lastName}
+                        </Link>
                       </td>
                       <td className="px-4 py-3 text-[color:var(--muted)]">
                         <p>{client.email}</p>

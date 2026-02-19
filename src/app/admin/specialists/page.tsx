@@ -2,6 +2,7 @@ import Link from "next/link";
 import { UserRole } from "@prisma/client";
 import { createSpecialistAction } from "@/app/actions";
 import { AuthenticatedShell } from "@/components/authenticated-shell";
+import { getOperationalSettings } from "@/lib/admin-settings";
 import { requirePageUser } from "@/lib/auth";
 import { formatDateTime } from "@/lib/format";
 import { listSpecialistsForOps } from "@/lib/case-service";
@@ -14,15 +15,24 @@ export default async function SpecialistManagementPage({
   searchParams,
 }: SpecialistManagementPageProps) {
   const user = await requirePageUser([UserRole.OPS]);
-  const specialists = await listSpecialistsForOps();
+  const [specialists, operationalSettings] = await Promise.all([
+    listSpecialistsForOps(),
+    getOperationalSettings(),
+  ]);
   const params = await searchParams;
   const error = typeof params.error === "string" ? params.error : null;
   const redirectTo = "/admin/specialists";
+  const usesCalCom = operationalSettings.schedulingEngineType === "calcom";
+  const calLabelClass = usesCalCom ? "text-[color:var(--foreground)]" : "text-[color:var(--muted)]";
+  const calInputClass = `w-full rounded-md border border-[color:var(--border)] px-3 py-2 text-sm ${
+    usesCalCom ? "" : "bg-slate-50 text-[color:var(--muted)]"
+  }`;
+  const calCellClass = usesCalCom ? "" : "text-[color:var(--muted)]";
 
   return (
     <AuthenticatedShell
       title="Counsellor Management"
-      subtitle="Create counsellors and configure Cal.com scheduling mappings."
+      subtitle="Create counsellors and configure external scheduler mappings."
       userName={user.name}
       role={user.role}
       navItems={[
@@ -43,6 +53,12 @@ export default async function SpecialistManagementPage({
 
       <section className="rounded-2xl border border-[color:var(--border)] bg-[color:var(--surface)] p-5 shadow-sm">
         <h2 className="text-lg font-semibold">Create counsellor</h2>
+        {!usesCalCom ? (
+          <p className="mt-2 rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-[color:var(--muted)]">
+            Scheduling engine is set to <strong>{operationalSettings.schedulingEngineType}</strong>.
+            Cal.com IDs are stored for compatibility but are not active in this mode.
+          </p>
+        ) : null}
         <form action={createSpecialistAction} className="mt-3 grid gap-3 md:grid-cols-2">
           <input type="hidden" name="redirectTo" value={redirectTo} />
 
@@ -84,7 +100,7 @@ export default async function SpecialistManagementPage({
           </div>
 
           <div>
-            <label htmlFor="calUserId" className="mb-1 block text-sm font-medium">
+            <label htmlFor="calUserId" className={`mb-1 block text-sm font-medium ${calLabelClass}`}>
               Cal.com user id
             </label>
             <input
@@ -92,12 +108,15 @@ export default async function SpecialistManagementPage({
               name="calUserId"
               required
               placeholder="counsellor-cal-user-id"
-              className="w-full rounded-md border border-[color:var(--border)] px-3 py-2 text-sm"
+              className={calInputClass}
             />
           </div>
 
           <div>
-            <label htmlFor="calIndividualEventTypeId" className="mb-1 block text-sm font-medium">
+            <label
+              htmlFor="calIndividualEventTypeId"
+              className={`mb-1 block text-sm font-medium ${calLabelClass}`}
+            >
               Cal.com Individual event type id
             </label>
             <input
@@ -105,19 +124,22 @@ export default async function SpecialistManagementPage({
               name="calIndividualEventTypeId"
               required
               placeholder="1001"
-              className="w-full rounded-md border border-[color:var(--border)] px-3 py-2 text-sm"
+              className={calInputClass}
             />
           </div>
 
           <div>
-            <label htmlFor="calCouplesEventTypeId" className="mb-1 block text-sm font-medium">
+            <label
+              htmlFor="calCouplesEventTypeId"
+              className={`mb-1 block text-sm font-medium ${calLabelClass}`}
+            >
               Cal.com Couples event type id (required if supports couples)
             </label>
             <input
               id="calCouplesEventTypeId"
               name="calCouplesEventTypeId"
               placeholder="1002"
-              className="w-full rounded-md border border-[color:var(--border)] px-3 py-2 text-sm"
+              className={calInputClass}
             />
           </div>
 
@@ -167,9 +189,9 @@ export default async function SpecialistManagementPage({
               <tr>
                 <th className="px-3 py-2 font-semibold">Name</th>
                 <th className="px-3 py-2 font-semibold">Email</th>
-                <th className="px-3 py-2 font-semibold">Cal User</th>
+                <th className={`px-3 py-2 font-semibold ${calCellClass}`}>Cal User</th>
                 <th className="px-3 py-2 font-semibold">Couples</th>
-                <th className="px-3 py-2 font-semibold">Event Type IDs</th>
+                <th className={`px-3 py-2 font-semibold ${calCellClass}`}>Event Type IDs</th>
                 <th className="px-3 py-2 font-semibold">Capabilities</th>
                 <th className="px-3 py-2 font-semibold">Next Session</th>
                 <th className="px-3 py-2 font-semibold">Actions</th>
@@ -187,9 +209,9 @@ export default async function SpecialistManagementPage({
                       </Link>
                     </td>
                     <td className="px-3 py-2">{specialist.email}</td>
-                    <td className="px-3 py-2">{specialist.calUserId}</td>
+                    <td className={`px-3 py-2 ${calCellClass}`}>{specialist.calUserId}</td>
                     <td className="px-3 py-2">{specialist.supportsCouples ? "Yes" : "No"}</td>
-                    <td className="px-3 py-2">
+                    <td className={`px-3 py-2 ${calCellClass}`}>
                       IND: {specialist.calIndividualEventTypeId}
                       <br />
                       CPL: {specialist.calCouplesEventTypeId || "-"}

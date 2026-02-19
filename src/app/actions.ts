@@ -17,6 +17,7 @@ import {
   isDomainError,
   overrideCaseAssignment,
   transitionCaseStatus,
+  updateCaseIntakeReviewNotes,
   updateSpecialistProfile,
   updateWorkflowStep,
 } from "@/lib/case-service";
@@ -235,6 +236,32 @@ export async function transitionCaseAction(formData: FormData) {
     revalidatePath("/admin/cases");
     revalidatePath(redirectTo);
     redirect(redirectTo);
+  } catch (error) {
+    redirect(encodeErrorPath(redirectTo, domainErrorMessage(error)));
+  }
+}
+
+export async function updateCaseIntakeReviewNotesAction(formData: FormData) {
+  const user = await requirePageUser([UserRole.OPS]);
+  const caseId = String(formData.get("caseId") || "").trim();
+  const notes = String(formData.get("notes") || "");
+  const redirectTo = String(formData.get("redirectTo") || `/admin/cases/${caseId}?panel=intake`);
+
+  if (!caseId) {
+    redirect(encodeErrorPath(redirectTo, "Case is required."));
+  }
+
+  try {
+    await updateCaseIntakeReviewNotes({
+      caseId,
+      notes,
+      actorUserId: user.id,
+    });
+
+    revalidatePath("/admin/cases");
+    revalidatePath(`/admin/cases/${caseId}`);
+    revalidatePath(redirectTo);
+    redirect(appendQuery(redirectTo, "intakeNotesSaved", "1"));
   } catch (error) {
     redirect(encodeErrorPath(redirectTo, domainErrorMessage(error)));
   }
