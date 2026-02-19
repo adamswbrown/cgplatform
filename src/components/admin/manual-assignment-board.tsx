@@ -714,7 +714,7 @@ export function ManualAssignmentBoard({
       ) : null}
 
       {viewMode === "kanban" ? (
-        <div className="grid gap-4 lg:grid-cols-[340px,minmax(0,1fr)]">
+        <div className="grid gap-4 lg:grid-cols-[340px_minmax(0,1fr)]">
           <div className="self-start lg:sticky lg:top-4 lg:h-[calc(100vh-7rem)]">{unassignedPanel}</div>
 
           <div className="overflow-x-auto pb-3">
@@ -799,7 +799,7 @@ export function ManualAssignmentBoard({
           </div>
         </div>
       ) : (
-        <div className="grid gap-4 xl:grid-cols-[340px,1fr]">
+        <div className="grid gap-4 xl:grid-cols-[340px_1fr]">
           <div className="xl:sticky xl:top-4 xl:h-[calc(100vh-7rem)] xl:self-start">{unassignedPanel}</div>
           <div className="space-y-4">
             {specialists.map((specialist) => {

@@ -8,6 +8,16 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 ## [Unreleased]
 
 ### Added
+
+### Changed
+
+### Fixed
+
+### Docs
+
+## [0.2.0] - 2026-02-19
+
+### Added
 - Added client drill-down profile page at `/admin/clients/[id]` with full client context:
   related cases, intake snapshot, scheduling gate summary, required document progress,
   availability windows, and PIN/access history.
@@ -37,6 +47,8 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 ### Fixed
 - Fixed assignment board usability so the `Unassigned` lane remains visible and usable during
   long board interaction by moving it outside the horizontal scroll container.
+- Fixed assignment board layout regression where malformed Tailwind grid template syntax caused
+  the unassigned panel to span the full page.
 - Fixed assigned-case visibility gap by surfacing client time preference on assigned cards
   and flagging assignments outside preferred blocks.
 - Fixed legacy availability data inconsistency by purging stale `AVAILABILITY_SUBMISSION`
@@ -66,5 +78,6 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - Provider event ingestion endpoint for external booking lifecycle sync.
 - Development simulation endpoints for test case creation and provider event simulation.
 
-[Unreleased]: https://github.com/adamswbrown/cgplatform/compare/0.1.0...HEAD
+[Unreleased]: https://github.com/adamswbrown/cgplatform/compare/0.2.0...HEAD
+[0.2.0]: https://github.com/adamswbrown/cgplatform/compare/0.1.0...0.2.0
 [0.1.0]: https://github.com/adamswbrown/cgplatform/releases/tag/0.1.0
