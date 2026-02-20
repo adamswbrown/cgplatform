@@ -59,7 +59,7 @@ type IntakeProfileSnapshot = {
   displayName: string;
   initials: string;
   applicationType: string;
-  counsellingType: string;
+  requestedSupport: string;
   mainIssue: string;
   issueDuration: string;
   preferredLocation: string;
@@ -222,6 +222,72 @@ const INTAKE_GROUP_CONFIG: Record<
     label: "Additional Responses",
   },
 };
+
+const INTAKE_FIELD_PATH_ORDER = [
+  "participantType",
+  "counsellingType",
+  "requestedDurationMinutes",
+  "primary.title",
+  "primary.firstName",
+  "primary.lastName",
+  "primary.dateOfBirth",
+  "primary.gender",
+  "primary.email",
+  "primary.mainPhone",
+  "primary.secondPhone",
+  "primary.addressLine1",
+  "primary.addressLine2",
+  "primary.city",
+  "primary.county",
+  "primary.postcode",
+  "primary.countryIfNotUk",
+  "primary.heardAbout",
+  "primary.heardAboutOtherDetail",
+  "primary.churchConnection",
+  "primary.leadershipRole",
+  "secondary.title",
+  "secondary.firstName",
+  "secondary.lastName",
+  "secondary.dateOfBirth",
+  "secondary.gender",
+  "secondary.email",
+  "secondary.mainPhone",
+  "presenting.mainIssue",
+  "presenting.otherDetails",
+  "presenting.issueDuration",
+  "presenting.previousSupport",
+  "presenting.previousSupportDetails",
+  "presenting.suicidalThoughtsRecently",
+  "presenting.suicidalThoughtsDetails",
+  "presenting.attemptedSuicide",
+  "presenting.attemptedSuicideDetails",
+  "availability.location",
+  "availability.includeOnline",
+  "availability.timePreferences[]",
+  "availability.selectedSlots[].startTime",
+  "availability.selectedSlots[].endTime",
+  "availability.selectedSlots[]",
+  "availability.notes",
+  "primary.contactPreferences.contactMainPhone",
+  "primary.contactPreferences.leaveVoicemailMainPhone",
+  "primary.contactPreferences.contactSecondPhone",
+  "primary.contactPreferences.leaveVoicemailSecondPhone",
+  "primary.contactPreferences.contactEmail",
+  "primary.emergencyContactFirstName",
+  "primary.emergencyContactLastName",
+  "primary.emergencyRelationship",
+  "primary.emergencyPhone",
+  "primary.gpSurgeryName",
+  "primary.gpSurgeryPhone",
+  "primary.gpDoctorName",
+  "consent.signatureType",
+  "consent.signature",
+  "consent.signedAt",
+] as const;
+
+const INTAKE_FIELD_PATH_ORDER_INDEX: Map<string, number> = new Map(
+  INTAKE_FIELD_PATH_ORDER.map((path, index) => [path, index] as const),
+);
 
 function normalizeIntakePath(path: string) {
   return path.replace(/\[\d+\]/g, "[]");
@@ -389,6 +455,47 @@ function resolveIntakeFieldGroup(path: string): IntakeFieldGroupKey {
   return "additional";
 }
 
+function intakePathSortWeight(path: string) {
+  const normalizedPath = normalizeIntakePath(path);
+  const explicitIndex = INTAKE_FIELD_PATH_ORDER_INDEX.get(normalizedPath);
+  const pathIndices = extractPathIndices(path);
+  const indexWeight =
+    pathIndices.length > 0
+      ? pathIndices.reduce((total, value, position) => total + value / 10 ** (position + 2), 0)
+      : 0;
+
+  if (typeof explicitIndex === "number") {
+    return explicitIndex + indexWeight;
+  }
+
+  if (normalizedPath.startsWith("primary.")) {
+    return 500 + indexWeight;
+  }
+  if (normalizedPath.startsWith("secondary.")) {
+    return 650 + indexWeight;
+  }
+  if (normalizedPath.startsWith("presenting.")) {
+    return 800 + indexWeight;
+  }
+  if (normalizedPath.startsWith("availability.")) {
+    return 950 + indexWeight;
+  }
+  if (normalizedPath.startsWith("consent.")) {
+    return 1100 + indexWeight;
+  }
+
+  return 2000 + indexWeight;
+}
+
+function compareIntakeDisplayRows(a: IntakeDisplayRow, b: IntakeDisplayRow) {
+  const weightDiff = intakePathSortWeight(a.path) - intakePathSortWeight(b.path);
+  if (weightDiff !== 0) {
+    return weightDiff;
+  }
+
+  return a.path.localeCompare(b.path);
+}
+
 function flattenIntakeFields(
   value: unknown,
   path = "",
@@ -487,7 +594,7 @@ function buildIntakeDisplayGroups(rows: IntakeFieldRow[]): IntakeFieldGroup[] {
   return INTAKE_GROUP_ORDER.map((key) => ({
     key,
     label: INTAKE_GROUP_CONFIG[key].label,
-    rows: groupedRows[key].sort((a, b) => a.label.localeCompare(b.label)),
+    rows: groupedRows[key].sort(compareIntakeDisplayRows),
   })).filter((group) => group.rows.length > 0);
 }
 
@@ -534,11 +641,29 @@ function isYesValue(value: string) {
   return value.trim().toLowerCase() === "yes";
 }
 
+function deriveRequestedSupport(counsellingType: string, applicationType: string) {
+  if (counsellingType && counsellingType !== "Not provided") {
+    return counsellingType;
+  }
+
+  if (applicationType === "Couple") {
+    return "Couples counselling";
+  }
+
+  if (applicationType === "Individual") {
+    return "Individual counselling";
+  }
+
+  return "Not specified";
+}
+
 function buildIntakeProfileSnapshot(
   rows: IntakeFieldRow[],
   participantNames: string[],
 ): IntakeProfileSnapshot {
   const lookup = buildIntakeValueLookup(rows);
+  const applicationType = firstLookupValue(lookup, "participantType");
+  const counsellingType = firstLookupValue(lookup, "counsellingType");
   const timePreferences = lookup.get("availability.timePreferences[]") || [];
   const suicidalThoughts = firstLookupValue(lookup, "presenting.suicidalThoughtsRecently");
   const attemptedSuicide = firstLookupValue(lookup, "presenting.attemptedSuicide");
@@ -554,8 +679,8 @@ function buildIntakeProfileSnapshot(
   return {
     displayName: participantNames.length > 0 ? participantNames.join(" & ") : "Intake profile",
     initials: formatParticipantInitials(participantNames),
-    applicationType: firstLookupValue(lookup, "participantType"),
-    counsellingType: firstLookupValue(lookup, "counsellingType"),
+    applicationType,
+    requestedSupport: deriveRequestedSupport(counsellingType, applicationType),
     mainIssue: firstLookupValue(lookup, "presenting.mainIssue"),
     issueDuration: firstLookupValue(lookup, "presenting.issueDuration"),
     preferredLocation: firstLookupValue(lookup, "availability.location"),
@@ -1134,10 +1259,10 @@ export default async function CaseDetailPage({ params, searchParams }: CaseDetai
 
           <div className="mt-3 flex flex-wrap gap-2">
             <span className="rounded-full border border-[color:var(--border)] bg-white px-3 py-1 text-xs font-semibold">
-              Application: {intakeProfileSnapshot?.applicationType || "Not provided"}
+              Application type: {intakeProfileSnapshot?.applicationType || "Not provided"}
             </span>
             <span className="rounded-full border border-[color:var(--border)] bg-white px-3 py-1 text-xs font-semibold">
-              Counselling: {intakeProfileSnapshot?.counsellingType || "Not provided"}
+              Requested support: {intakeProfileSnapshot?.requestedSupport || "Not specified"}
             </span>
             <span className="rounded-full border border-[color:var(--border)] bg-white px-3 py-1 text-xs font-semibold">
               Location: {intakeProfileSnapshot?.preferredLocation || "Not provided"}
@@ -1204,7 +1329,7 @@ export default async function CaseDetailPage({ params, searchParams }: CaseDetai
               <p className="text-xs font-semibold uppercase tracking-wide text-[color:var(--muted)]">
                 Presenting concerns
               </p>
-              <div className="mt-3 grid max-h-72 gap-2 overflow-auto pr-1">
+              <div className="mt-3 grid gap-2">
                 {intakePresentingRows.length > 0 ? (
                   intakePresentingRows.map((row, index) => (
                     <article
@@ -1227,7 +1352,7 @@ export default async function CaseDetailPage({ params, searchParams }: CaseDetai
               <p className="text-xs font-semibold uppercase tracking-wide text-[color:var(--muted)]">
                 Availability
               </p>
-              <div className="mt-3 grid max-h-72 gap-2 overflow-auto pr-1">
+              <div className="mt-3 grid gap-2">
                 {intakeAvailabilityRows.length > 0 ? (
                   intakeAvailabilityRows.map((row, index) => (
                     <article
@@ -1250,9 +1375,9 @@ export default async function CaseDetailPage({ params, searchParams }: CaseDetai
           <div className="mt-4 grid gap-4 xl:grid-cols-12">
             <article className="rounded-xl border border-[color:var(--border)] bg-white p-4 xl:col-span-8">
               <p className="text-xs font-semibold uppercase tracking-wide text-[color:var(--muted)]">
-                Intake responses
+                Profile information & intake responses
               </p>
-              <div className="mt-3 grid max-h-80 gap-2 overflow-auto pr-1 md:grid-cols-2">
+              <div className="mt-3 grid gap-2 md:grid-cols-2">
                 {intakeResponseRows.length > 0 ? (
                   intakeResponseRows.map((row, index) => (
                     <article
@@ -1308,7 +1433,7 @@ export default async function CaseDetailPage({ params, searchParams }: CaseDetai
               <p className="text-xs font-semibold uppercase tracking-wide text-[color:var(--muted)]">
                 Emergency, GP & consent
               </p>
-              <div className="mt-3 grid max-h-72 gap-2 overflow-auto pr-1 md:grid-cols-2">
+              <div className="mt-3 grid gap-2 md:grid-cols-2">
                 {intakeSupportingRows.map((row, index) => (
                   <article
                     key={`supporting-row:${row.path}:${index}`}
