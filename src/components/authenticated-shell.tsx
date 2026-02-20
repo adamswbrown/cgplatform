@@ -225,7 +225,7 @@ export function AuthenticatedShell({
                 </Link>
               </div>
               <p className="cg-nav-label mt-3">{roleLabel(role)}</p>
-              <h1 className="mt-1 text-[clamp(2.1rem,4.2vw,3.35rem)]">{title}</h1>
+              <h1 className="mt-1 text-[clamp(1.55rem,2.4vw,1.95rem)]">{title}</h1>
               <p className="mt-2 text-sm font-normal text-white/80">{subtitle}</p>
             </div>
             <div className="flex items-center gap-3">

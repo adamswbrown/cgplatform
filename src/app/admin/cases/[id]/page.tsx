@@ -78,10 +78,10 @@ const CASE_PANELS: Array<{ id: CasePanel; label: string }> = [
 ];
 
 function normalizeCasePanel(value: string | undefined): CasePanel {
-  if (value === "intake" || value === "forms" || value === "history") {
+  if (value === "assignment" || value === "intake" || value === "forms" || value === "history") {
     return value;
   }
-  return "assignment";
+  return "intake";
 }
 
 function tabClassName(active: boolean) {
@@ -668,7 +668,7 @@ export default async function CaseDetailPage({ params, searchParams }: CaseDetai
 
   return (
     <AuthenticatedShell
-      title={`Case ${caseItem.reference}`}
+      title={caseItem.reference}
       subtitle="Manage lifecycle state, required documents, provider booking references, and audit logs."
       userName={user.name}
       role={user.role}
