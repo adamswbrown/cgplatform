@@ -52,7 +52,6 @@ type IntakeFieldGroupKey =
 type IntakeFieldGroup = {
   key: IntakeFieldGroupKey;
   label: string;
-  defaultOpen: boolean;
   rows: IntakeDisplayRow[];
 };
 
@@ -72,8 +71,8 @@ type IntakeProfileSnapshot = {
 type CasePanel = "assignment" | "intake" | "forms" | "history";
 
 const CASE_PANELS: Array<{ id: CasePanel; label: string }> = [
-  { id: "assignment", label: "Assignment" },
   { id: "intake", label: "Intake" },
+  { id: "assignment", label: "Assignment" },
   { id: "forms", label: "Forms & PINs" },
   { id: "history", label: "History" },
 ];
@@ -199,36 +198,28 @@ const INTAKE_GROUP_CONFIG: Record<
   IntakeFieldGroupKey,
   {
     label: string;
-    defaultOpen: boolean;
   }
 > = {
   snapshot: {
-    label: "Application Snapshot",
-    defaultOpen: true,
+    label: "Application",
   },
   participants: {
-    label: "Participant Profiles",
-    defaultOpen: false,
+    label: "Intake Responses",
   },
   presenting: {
     label: "Presenting Concerns",
-    defaultOpen: true,
   },
   availability: {
-    label: "Availability Preferences",
-    defaultOpen: true,
+    label: "Availability",
   },
   contact: {
     label: "Contact, Emergency & GP",
-    defaultOpen: false,
   },
   consent: {
     label: "Consent Record",
-    defaultOpen: false,
   },
   additional: {
     label: "Additional Responses",
-    defaultOpen: false,
   },
 };
 
@@ -496,7 +487,6 @@ function buildIntakeDisplayGroups(rows: IntakeFieldRow[]): IntakeFieldGroup[] {
   return INTAKE_GROUP_ORDER.map((key) => ({
     key,
     label: INTAKE_GROUP_CONFIG[key].label,
-    defaultOpen: INTAKE_GROUP_CONFIG[key].defaultOpen,
     rows: groupedRows[key].sort((a, b) => a.label.localeCompare(b.label)),
   })).filter((group) => group.rows.length > 0);
 }
@@ -575,6 +565,24 @@ function buildIntakeProfileSnapshot(
   };
 }
 
+function buildIntakeGroupMap(groups: IntakeFieldGroup[]) {
+  const map: Record<IntakeFieldGroupKey, IntakeDisplayRow[]> = {
+    snapshot: [],
+    participants: [],
+    presenting: [],
+    availability: [],
+    contact: [],
+    consent: [],
+    additional: [],
+  };
+
+  groups.forEach((group) => {
+    map[group.key] = group.rows;
+  });
+
+  return map;
+}
+
 export default async function CaseDetailPage({ params, searchParams }: CaseDetailPageProps) {
   const user = await requirePageUser([UserRole.OPS]);
   const { id } = await params;
@@ -642,6 +650,17 @@ export default async function CaseDetailPage({ params, searchParams }: CaseDetai
     activePanel === "intake"
       ? buildIntakeProfileSnapshot(intakeFieldRows, participantDisplayNames)
       : null;
+  const intakeGroupMap =
+    activePanel === "intake" ? buildIntakeGroupMap(intakeDisplayGroups) : null;
+  const intakeSnapshotRows = intakeGroupMap?.snapshot || [];
+  const intakePresentingRows = intakeGroupMap?.presenting || [];
+  const intakeAvailabilityRows = intakeGroupMap?.availability || [];
+  const intakeParticipantRows = intakeGroupMap?.participants || [];
+  const intakeContactRows = intakeGroupMap?.contact || [];
+  const intakeConsentRows = intakeGroupMap?.consent || [];
+  const intakeAdditionalRows = intakeGroupMap?.additional || [];
+  const intakeResponseRows = [...intakeParticipantRows, ...intakeAdditionalRows];
+  const intakeSupportingRows = [...intakeContactRows, ...intakeConsentRows];
   const intakePayloadJson =
     activePanel === "intake" && caseItem.intakeFormData
       ? JSON.stringify(caseItem.intakeFormData, null, 2)
@@ -1095,11 +1114,9 @@ export default async function CaseDetailPage({ params, searchParams }: CaseDetai
         <section className="mt-4 rounded-2xl border border-[color:var(--border)] bg-[color:var(--surface)] p-5 shadow-sm">
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
-              <h3 className="text-sm font-semibold uppercase tracking-wide text-[color:var(--muted)]">
-                Intake Profile
-              </h3>
+              <h3 className="text-sm font-semibold uppercase tracking-wide text-[color:var(--muted)]">Intake Review</h3>
               <p className="mt-1 text-xs text-[color:var(--muted)]">
-                Human-readable view of the submitted application details.
+                Quick review of presenting concerns, availability, and full intake responses.
               </p>
             </div>
             <p className="text-xs text-[color:var(--muted)]">
@@ -1115,79 +1132,142 @@ export default async function CaseDetailPage({ params, searchParams }: CaseDetai
             </p>
           ) : null}
 
+          <div className="mt-3 flex flex-wrap gap-2">
+            <span className="rounded-full border border-[color:var(--border)] bg-white px-3 py-1 text-xs font-semibold">
+              Application: {intakeProfileSnapshot?.applicationType || "Not provided"}
+            </span>
+            <span className="rounded-full border border-[color:var(--border)] bg-white px-3 py-1 text-xs font-semibold">
+              Counselling: {intakeProfileSnapshot?.counsellingType || "Not provided"}
+            </span>
+            <span className="rounded-full border border-[color:var(--border)] bg-white px-3 py-1 text-xs font-semibold">
+              Location: {intakeProfileSnapshot?.preferredLocation || "Not provided"}
+            </span>
+            <span className="rounded-full border border-[color:var(--border)] bg-white px-3 py-1 text-xs font-semibold">
+              Online: {intakeProfileSnapshot?.onlinePreference || "Not provided"}
+            </span>
+            {(intakeProfileSnapshot?.timePreferences || []).map((timePreference) => (
+              <span
+                key={`time-preference-chip:${timePreference}`}
+                className="rounded-full border border-[color:var(--border)] bg-[color:var(--accent-soft)] px-3 py-1 text-xs font-semibold uppercase tracking-wide"
+              >
+                {timePreference}
+              </span>
+            ))}
+            {(intakeProfileSnapshot?.riskSignals || []).map((riskSignal) => (
+              <span
+                key={`risk-chip:${riskSignal}`}
+                className="rounded-full border border-amber-300 bg-amber-100 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-amber-900"
+              >
+                {riskSignal}
+              </span>
+            ))}
+          </div>
+
           <div className="mt-4 grid gap-4 xl:grid-cols-12">
-            <article className="rounded-xl border border-[color:var(--border)] bg-white p-4 xl:col-span-8">
-              <div className="flex flex-wrap items-start gap-4">
-                <div className="flex h-14 w-14 items-center justify-center rounded-full bg-[color:var(--accent-soft)] text-sm font-semibold text-[color:var(--cg-ink)]">
+            <article className="rounded-xl border border-[color:var(--border)] bg-white p-4 xl:col-span-4">
+              <p className="text-xs font-semibold uppercase tracking-wide text-[color:var(--muted)]">
+                Client at a glance
+              </p>
+              <div className="mt-3 flex items-center gap-3">
+                <div className="flex h-12 w-12 items-center justify-center rounded-full bg-[color:var(--accent-soft)] text-sm font-semibold text-[color:var(--cg-ink)]">
                   {intakeProfileSnapshot?.initials || "N/A"}
                 </div>
-                <div className="min-w-[16rem] flex-1">
-                  <p className="text-[11px] font-semibold uppercase tracking-[2px] text-[color:var(--muted)]">
-                    Application Profile
-                  </p>
-                  <h4 className="mt-1 text-xl font-semibold text-[color:var(--cg-ink)]">
+                <div>
+                  <p className="text-base font-semibold text-[color:var(--cg-ink)]">
                     {intakeProfileSnapshot?.displayName || "No intake participants"}
-                  </h4>
-                  <p className="mt-1 text-sm text-[color:var(--muted)]">
-                    Application: {intakeProfileSnapshot?.applicationType || "Not provided"} •
-                    Counselling type: {intakeProfileSnapshot?.counsellingType || "Not provided"}
                   </p>
-                  <div className="mt-2 flex flex-wrap gap-2">
-                    {(intakeProfileSnapshot?.timePreferences || []).length > 0 ? (
-                      intakeProfileSnapshot!.timePreferences.map((timePreference) => (
-                        <span
-                          key={timePreference}
-                          className="rounded-full border border-[color:var(--border)] bg-[color:var(--accent-soft)] px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wide"
-                        >
-                          {timePreference}
-                        </span>
-                      ))
-                    ) : (
-                      <span className="rounded-full border border-[color:var(--border)] px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wide text-[color:var(--muted)]">
-                        No preferred time block provided
-                      </span>
-                    )}
-                    {(intakeProfileSnapshot?.riskSignals || []).length > 0
-                      ? intakeProfileSnapshot!.riskSignals.map((riskSignal) => (
-                          <span
-                            key={riskSignal}
-                            className="rounded-full border border-amber-300 bg-amber-100 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wide text-amber-900"
-                          >
-                            {riskSignal}
-                          </span>
-                        ))
-                      : null}
-                  </div>
+                  <p className="text-sm text-[color:var(--muted)]">
+                    Main issue: {intakeProfileSnapshot?.mainIssue || "Not provided"}
+                  </p>
                 </div>
               </div>
+              <div className="mt-3 grid gap-2">
+                {intakeSnapshotRows.length > 0 ? (
+                  intakeSnapshotRows.slice(0, 4).map((row, index) => (
+                    <article
+                      key={`snapshot-row:${row.path}:${index}`}
+                      className="rounded-lg border border-[color:var(--border)] bg-[color:var(--accent-soft)]/35 px-3 py-2"
+                    >
+                      <p className="text-[11px] font-semibold uppercase tracking-wide text-[color:var(--muted)]">
+                        {row.label}
+                      </p>
+                      <p className="mt-0.5 text-sm">{row.response}</p>
+                    </article>
+                  ))
+                ) : (
+                  <p className="text-sm text-[color:var(--muted)]">No summary responses.</p>
+                )}
+              </div>
+            </article>
 
-              <div className="mt-4 grid gap-3 md:grid-cols-2">
-                <div className="rounded-lg border border-[color:var(--border)] bg-[color:var(--accent-soft)]/35 p-3">
-                  <p className="text-[11px] font-semibold uppercase tracking-wide text-[color:var(--muted)]">
-                    Main issue
-                  </p>
-                  <p className="mt-1 text-sm">{intakeProfileSnapshot?.mainIssue || "Not provided"}</p>
-                </div>
-                <div className="rounded-lg border border-[color:var(--border)] bg-[color:var(--accent-soft)]/35 p-3">
-                  <p className="text-[11px] font-semibold uppercase tracking-wide text-[color:var(--muted)]">
-                    Issue duration
-                  </p>
-                  <p className="mt-1 text-sm">{intakeProfileSnapshot?.issueDuration || "Not provided"}</p>
-                </div>
-                <div className="rounded-lg border border-[color:var(--border)] bg-[color:var(--accent-soft)]/35 p-3">
-                  <p className="text-[11px] font-semibold uppercase tracking-wide text-[color:var(--muted)]">
-                    Preferred location
-                  </p>
-                  <p className="mt-1 text-sm">
-                    {intakeProfileSnapshot?.preferredLocation || "Not provided"}
-                  </p>
-                </div>
-                <div className="rounded-lg border border-[color:var(--border)] bg-[color:var(--accent-soft)]/35 p-3">
-                  <p className="text-[11px] font-semibold uppercase tracking-wide text-[color:var(--muted)]">
-                    Online sessions
-                  </p>
-                  <p className="mt-1 text-sm">{intakeProfileSnapshot?.onlinePreference || "Not provided"}</p>
-                </div>
+            <article className="rounded-xl border border-[color:var(--border)] bg-white p-4 xl:col-span-4">
+              <p className="text-xs font-semibold uppercase tracking-wide text-[color:var(--muted)]">
+                Presenting concerns
+              </p>
+              <div className="mt-3 grid max-h-72 gap-2 overflow-auto pr-1">
+                {intakePresentingRows.length > 0 ? (
+                  intakePresentingRows.map((row, index) => (
+                    <article
+                      key={`presenting-row:${row.path}:${index}`}
+                      className="rounded-lg border border-[color:var(--border)] bg-[color:var(--accent-soft)]/35 px-3 py-2"
+                    >
+                      <p className="text-[11px] font-semibold uppercase tracking-wide text-[color:var(--muted)]">
+                        {row.label}
+                      </p>
+                      <p className="mt-0.5 text-sm">{row.response}</p>
+                    </article>
+                  ))
+                ) : (
+                  <p className="text-sm text-[color:var(--muted)]">No presenting concern responses.</p>
+                )}
+              </div>
+            </article>
+
+            <article className="rounded-xl border border-[color:var(--border)] bg-white p-4 xl:col-span-4">
+              <p className="text-xs font-semibold uppercase tracking-wide text-[color:var(--muted)]">
+                Availability
+              </p>
+              <div className="mt-3 grid max-h-72 gap-2 overflow-auto pr-1">
+                {intakeAvailabilityRows.length > 0 ? (
+                  intakeAvailabilityRows.map((row, index) => (
+                    <article
+                      key={`availability-row:${row.path}:${index}`}
+                      className="rounded-lg border border-[color:var(--border)] bg-[color:var(--accent-soft)]/35 px-3 py-2"
+                    >
+                      <p className="text-[11px] font-semibold uppercase tracking-wide text-[color:var(--muted)]">
+                        {row.label}
+                      </p>
+                      <p className="mt-0.5 text-sm">{row.response}</p>
+                    </article>
+                  ))
+                ) : (
+                  <p className="text-sm text-[color:var(--muted)]">No availability responses.</p>
+                )}
+              </div>
+            </article>
+          </div>
+
+          <div className="mt-4 grid gap-4 xl:grid-cols-12">
+            <article className="rounded-xl border border-[color:var(--border)] bg-white p-4 xl:col-span-8">
+              <p className="text-xs font-semibold uppercase tracking-wide text-[color:var(--muted)]">
+                Intake responses
+              </p>
+              <div className="mt-3 grid max-h-80 gap-2 overflow-auto pr-1 md:grid-cols-2">
+                {intakeResponseRows.length > 0 ? (
+                  intakeResponseRows.map((row, index) => (
+                    <article
+                      key={`response-row:${row.path}:${index}`}
+                      className="rounded-lg border border-[color:var(--border)] bg-[color:var(--accent-soft)]/30 px-3 py-2"
+                    >
+                      <p className="text-[11px] font-semibold uppercase tracking-wide text-[color:var(--muted)]">
+                        {row.label}
+                      </p>
+                      <p className="mt-0.5 text-sm">{row.response}</p>
+                    </article>
+                  ))
+                ) : (
+                  <p className="text-sm text-[color:var(--muted)]">No participant intake responses.</p>
+                )}
               </div>
             </article>
 
@@ -1210,7 +1290,7 @@ export default async function CaseDetailPage({ params, searchParams }: CaseDetai
                 id="intakeReviewNotes"
                 name="notes"
                 defaultValue={caseItem.intakeReviewNotes || ""}
-                rows={10}
+                rows={8}
                 placeholder="Add review summary, risk observations, and next actions..."
                 className="mt-2 w-full rounded-md border border-[color:var(--border)] px-3 py-2 text-sm"
               />
@@ -1223,43 +1303,26 @@ export default async function CaseDetailPage({ params, searchParams }: CaseDetai
             </form>
           </div>
 
-          {intakeDisplayGroups.length === 0 ? (
-            <p className="mt-4 rounded-lg border border-[color:var(--border)] bg-white px-3 py-2 text-sm text-[color:var(--muted)]">
-              No intake responses are currently stored for this case.
-            </p>
-          ) : (
-            <div className="mt-4 grid gap-3 xl:grid-cols-2">
-              {intakeDisplayGroups.map((group) => (
-                <details
-                  key={group.key}
-                  open={group.defaultOpen}
-                  className="overflow-hidden rounded-xl border border-[color:var(--border)] bg-white"
-                >
-                  <summary className="cursor-pointer px-4 py-3">
-                    <p className="text-xs font-semibold uppercase tracking-wide text-[color:var(--muted)]">
-                      {group.label}
+          {intakeSupportingRows.length > 0 ? (
+            <article className="mt-4 rounded-xl border border-[color:var(--border)] bg-white p-4">
+              <p className="text-xs font-semibold uppercase tracking-wide text-[color:var(--muted)]">
+                Emergency, GP & consent
+              </p>
+              <div className="mt-3 grid max-h-72 gap-2 overflow-auto pr-1 md:grid-cols-2">
+                {intakeSupportingRows.map((row, index) => (
+                  <article
+                    key={`supporting-row:${row.path}:${index}`}
+                    className="rounded-lg border border-[color:var(--border)] bg-[color:var(--accent-soft)]/30 px-3 py-2"
+                  >
+                    <p className="text-[11px] font-semibold uppercase tracking-wide text-[color:var(--muted)]">
+                      {row.label}
                     </p>
-                    <p className="mt-1 text-xs text-[color:var(--muted)]">
-                      {group.rows.length} response{group.rows.length === 1 ? "" : "s"}
-                    </p>
-                  </summary>
-                  <div className="grid gap-2 border-t border-[color:var(--border)] p-3">
-                    {group.rows.map((row, index) => (
-                      <article
-                        key={`${group.key}:${row.path}:${index}`}
-                        className="rounded-lg border border-[color:var(--border)] bg-[color:var(--accent-soft)]/35 p-3"
-                      >
-                        <p className="text-[11px] font-semibold uppercase tracking-wide text-[color:var(--muted)]">
-                          {row.label}
-                        </p>
-                        <p className="mt-1 whitespace-pre-wrap break-words text-sm">{row.response}</p>
-                      </article>
-                    ))}
-                  </div>
-                </details>
-              ))}
-            </div>
-          )}
+                    <p className="mt-0.5 text-sm">{row.response}</p>
+                  </article>
+                ))}
+              </div>
+            </article>
+          ) : null}
 
           {intakePayloadJson ? (
             <details className="mt-3 rounded-lg border border-[color:var(--border)] p-3">
