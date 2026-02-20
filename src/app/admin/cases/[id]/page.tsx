@@ -34,6 +34,41 @@ type IntakeFieldRow = {
   rawValue: unknown;
 };
 
+type IntakeDisplayRow = {
+  path: string;
+  label: string;
+  response: string;
+};
+
+type IntakeFieldGroupKey =
+  | "snapshot"
+  | "participants"
+  | "presenting"
+  | "availability"
+  | "contact"
+  | "consent"
+  | "additional";
+
+type IntakeFieldGroup = {
+  key: IntakeFieldGroupKey;
+  label: string;
+  defaultOpen: boolean;
+  rows: IntakeDisplayRow[];
+};
+
+type IntakeProfileSnapshot = {
+  displayName: string;
+  initials: string;
+  applicationType: string;
+  counsellingType: string;
+  mainIssue: string;
+  issueDuration: string;
+  preferredLocation: string;
+  onlinePreference: string;
+  timePreferences: string[];
+  riskSignals: string[];
+};
+
 type CasePanel = "assignment" | "intake" | "forms" | "history";
 
 const CASE_PANELS: Array<{ id: CasePanel; label: string }> = [
@@ -148,6 +183,53 @@ const INTAKE_FIELD_LABELS: Record<string, string> = {
   "consent.signatureType": "Consent signature type",
   "consent.signedAt": "Consent signed at",
   "consent.signature": "Consent signature",
+};
+
+const INTAKE_GROUP_ORDER: IntakeFieldGroupKey[] = [
+  "snapshot",
+  "participants",
+  "presenting",
+  "availability",
+  "contact",
+  "consent",
+  "additional",
+];
+
+const INTAKE_GROUP_CONFIG: Record<
+  IntakeFieldGroupKey,
+  {
+    label: string;
+    defaultOpen: boolean;
+  }
+> = {
+  snapshot: {
+    label: "Application Snapshot",
+    defaultOpen: true,
+  },
+  participants: {
+    label: "Participant Profiles",
+    defaultOpen: false,
+  },
+  presenting: {
+    label: "Presenting Concerns",
+    defaultOpen: true,
+  },
+  availability: {
+    label: "Availability Preferences",
+    defaultOpen: true,
+  },
+  contact: {
+    label: "Contact, Emergency & GP",
+    defaultOpen: false,
+  },
+  consent: {
+    label: "Consent Record",
+    defaultOpen: false,
+  },
+  additional: {
+    label: "Additional Responses",
+    defaultOpen: false,
+  },
 };
 
 function normalizeIntakePath(path: string) {
@@ -278,6 +360,44 @@ function formatIntakeFieldValue(path: string, rawValue: unknown) {
   return formatIntakeScalar(rawValue);
 }
 
+function resolveIntakeFieldGroup(path: string): IntakeFieldGroupKey {
+  const normalizedPath = normalizeIntakePath(path);
+
+  if (
+    normalizedPath === "participantType" ||
+    normalizedPath === "counsellingType" ||
+    normalizedPath === "requestedDurationMinutes"
+  ) {
+    return "snapshot";
+  }
+
+  if (normalizedPath.startsWith("presenting.")) {
+    return "presenting";
+  }
+
+  if (normalizedPath.startsWith("availability.")) {
+    return "availability";
+  }
+
+  if (normalizedPath.startsWith("consent.")) {
+    return "consent";
+  }
+
+  if (
+    normalizedPath.startsWith("primary.contactPreferences.") ||
+    normalizedPath.startsWith("primary.emergency") ||
+    normalizedPath.startsWith("primary.gp")
+  ) {
+    return "contact";
+  }
+
+  if (normalizedPath.startsWith("primary.") || normalizedPath.startsWith("secondary.")) {
+    return "participants";
+  }
+
+  return "additional";
+}
+
 function flattenIntakeFields(
   value: unknown,
   path = "",
@@ -337,6 +457,124 @@ function flattenIntakeFields(
   return rows;
 }
 
+function buildIntakeDisplayGroups(rows: IntakeFieldRow[]): IntakeFieldGroup[] {
+  if (rows.length === 0) {
+    return [];
+  }
+
+  const groupedRows: Record<IntakeFieldGroupKey, IntakeDisplayRow[]> = {
+    snapshot: [],
+    participants: [],
+    presenting: [],
+    availability: [],
+    contact: [],
+    consent: [],
+    additional: [],
+  };
+
+  rows
+    .filter((row) => row.path !== "(root)")
+    .forEach((row) => {
+      const response = formatIntakeFieldValue(row.path, row.rawValue);
+      if (
+        response === "Not provided" ||
+        response === "(empty)" ||
+        response === "No data" ||
+        response === "No entries"
+      ) {
+        return;
+      }
+
+      const group = resolveIntakeFieldGroup(row.path);
+      groupedRows[group].push({
+        path: row.path,
+        label: formatIntakeFieldLabel(row.path),
+        response,
+      });
+    });
+
+  return INTAKE_GROUP_ORDER.map((key) => ({
+    key,
+    label: INTAKE_GROUP_CONFIG[key].label,
+    defaultOpen: INTAKE_GROUP_CONFIG[key].defaultOpen,
+    rows: groupedRows[key].sort((a, b) => a.label.localeCompare(b.label)),
+  })).filter((group) => group.rows.length > 0);
+}
+
+function buildIntakeValueLookup(rows: IntakeFieldRow[]) {
+  const lookup = new Map<string, string[]>();
+
+  rows
+    .filter((row) => row.path !== "(root)")
+    .forEach((row) => {
+      const key = normalizeIntakePath(row.path);
+      const value = formatIntakeFieldValue(row.path, row.rawValue);
+      if (
+        value === "Not provided" ||
+        value === "(empty)" ||
+        value === "No data" ||
+        value === "No entries"
+      ) {
+        return;
+      }
+
+      const existing = lookup.get(key) || [];
+      existing.push(value);
+      lookup.set(key, existing);
+    });
+
+  return lookup;
+}
+
+function firstLookupValue(lookup: Map<string, string[]>, key: string) {
+  return lookup.get(key)?.[0] || "Not provided";
+}
+
+function formatParticipantInitials(participantNames: string[]) {
+  const initials = participantNames
+    .map((name) => name.trim().charAt(0).toUpperCase())
+    .filter(Boolean)
+    .slice(0, 3)
+    .join("");
+
+  return initials || "N/A";
+}
+
+function isYesValue(value: string) {
+  return value.trim().toLowerCase() === "yes";
+}
+
+function buildIntakeProfileSnapshot(
+  rows: IntakeFieldRow[],
+  participantNames: string[],
+): IntakeProfileSnapshot {
+  const lookup = buildIntakeValueLookup(rows);
+  const timePreferences = lookup.get("availability.timePreferences[]") || [];
+  const suicidalThoughts = firstLookupValue(lookup, "presenting.suicidalThoughtsRecently");
+  const attemptedSuicide = firstLookupValue(lookup, "presenting.attemptedSuicide");
+  const riskSignals: string[] = [];
+
+  if (isYesValue(suicidalThoughts)) {
+    riskSignals.push("Recent suicidal thoughts");
+  }
+  if (isYesValue(attemptedSuicide)) {
+    riskSignals.push("Attempted suicide history");
+  }
+
+  return {
+    displayName: participantNames.length > 0 ? participantNames.join(" & ") : "Intake profile",
+    initials: formatParticipantInitials(participantNames),
+    applicationType: firstLookupValue(lookup, "participantType"),
+    counsellingType: firstLookupValue(lookup, "counsellingType"),
+    mainIssue: firstLookupValue(lookup, "presenting.mainIssue"),
+    issueDuration: firstLookupValue(lookup, "presenting.issueDuration"),
+    preferredLocation: firstLookupValue(lookup, "availability.location"),
+    onlinePreference: firstLookupValue(lookup, "availability.includeOnline"),
+    timePreferences,
+    riskSignals,
+  };
+}
+
 export default async function CaseDetailPage({ params, searchParams }: CaseDetailPageProps) {
   const user = await requirePageUser([UserRole.OPS]);
   const { id } = await params;
@@ -392,6 +630,18 @@ export default async function CaseDetailPage({ params, searchParams }: CaseDetai
     operationalSettings?.defaultSpecialistStandardEndHour ?? 18,
   );
   const intakeFieldRows = activePanel === "intake" ? flattenIntakeFields(caseItem.intakeFormData) : [];
+  const intakeDisplayGroups =
+    activePanel === "intake" ? buildIntakeDisplayGroups(intakeFieldRows) : [];
+  const participantDisplayNames =
+    activePanel === "intake"
+      ? caseItem.participants.map(
+          (participant) => `${participant.client.firstName} ${participant.client.lastName}`,
+        )
+      : [];
+  const intakeProfileSnapshot =
+    activePanel === "intake"
+      ? buildIntakeProfileSnapshot(intakeFieldRows, participantDisplayNames)
+      : null;
   const intakePayloadJson =
     activePanel === "intake" && caseItem.intakeFormData
       ? JSON.stringify(caseItem.intakeFormData, null, 2)
@@ -843,14 +1093,21 @@ export default async function CaseDetailPage({ params, searchParams }: CaseDetai
 
       {activePanel === "intake" ? (
         <section className="mt-4 rounded-2xl border border-[color:var(--border)] bg-[color:var(--surface)] p-5 shadow-sm">
-          <h3 className="text-sm font-semibold uppercase tracking-wide text-[color:var(--muted)]">
-            Intake Submission
-          </h3>
-          <p className="mt-2 text-xs text-[color:var(--muted)]">
-            Source: {caseItem.intakeSource}
-            {caseItem.intakeExternalId ? ` • External ID: ${caseItem.intakeExternalId}` : ""}
-            {caseItem.intakeReceivedAt ? ` • Received: ${formatDateTime(caseItem.intakeReceivedAt)}` : ""}
-          </p>
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <h3 className="text-sm font-semibold uppercase tracking-wide text-[color:var(--muted)]">
+                Intake Profile
+              </h3>
+              <p className="mt-1 text-xs text-[color:var(--muted)]">
+                Human-readable view of the submitted application details.
+              </p>
+            </div>
+            <p className="text-xs text-[color:var(--muted)]">
+              Source: {caseItem.intakeSource}
+              {caseItem.intakeExternalId ? ` • External ID: ${caseItem.intakeExternalId}` : ""}
+              {caseItem.intakeReceivedAt ? ` • Received: ${formatDateTime(caseItem.intakeReceivedAt)}` : ""}
+            </p>
+          </div>
 
           {intakeNotesSaved ? (
             <p className="mt-3 rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-800">
@@ -858,65 +1115,156 @@ export default async function CaseDetailPage({ params, searchParams }: CaseDetai
             </p>
           ) : null}
 
-          <form
-            action={updateCaseIntakeReviewNotesAction}
-            className="mt-3 rounded-lg border border-[color:var(--border)] bg-white p-3"
-          >
-            <input type="hidden" name="caseId" value={caseItem.id} />
-            <input type="hidden" name="redirectTo" value={panelHref("intake")} />
+          <div className="mt-4 grid gap-4 xl:grid-cols-12">
+            <article className="rounded-xl border border-[color:var(--border)] bg-white p-4 xl:col-span-8">
+              <div className="flex flex-wrap items-start gap-4">
+                <div className="flex h-14 w-14 items-center justify-center rounded-full bg-[color:var(--accent-soft)] text-sm font-semibold text-[color:var(--cg-ink)]">
+                  {intakeProfileSnapshot?.initials || "N/A"}
+                </div>
+                <div className="min-w-[16rem] flex-1">
+                  <p className="text-[11px] font-semibold uppercase tracking-[2px] text-[color:var(--muted)]">
+                    Application Profile
+                  </p>
+                  <h4 className="mt-1 text-xl font-semibold text-[color:var(--cg-ink)]">
+                    {intakeProfileSnapshot?.displayName || "No intake participants"}
+                  </h4>
+                  <p className="mt-1 text-sm text-[color:var(--muted)]">
+                    Application: {intakeProfileSnapshot?.applicationType || "Not provided"} •
+                    Counselling type: {intakeProfileSnapshot?.counsellingType || "Not provided"}
+                  </p>
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    {(intakeProfileSnapshot?.timePreferences || []).length > 0 ? (
+                      intakeProfileSnapshot!.timePreferences.map((timePreference) => (
+                        <span
+                          key={timePreference}
+                          className="rounded-full border border-[color:var(--border)] bg-[color:var(--accent-soft)] px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wide"
+                        >
+                          {timePreference}
+                        </span>
+                      ))
+                    ) : (
+                      <span className="rounded-full border border-[color:var(--border)] px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wide text-[color:var(--muted)]">
+                        No preferred time block provided
+                      </span>
+                    )}
+                    {(intakeProfileSnapshot?.riskSignals || []).length > 0
+                      ? intakeProfileSnapshot!.riskSignals.map((riskSignal) => (
+                          <span
+                            key={riskSignal}
+                            className="rounded-full border border-amber-300 bg-amber-100 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wide text-amber-900"
+                          >
+                            {riskSignal}
+                          </span>
+                        ))
+                      : null}
+                  </div>
+                </div>
+              </div>
 
-            <label htmlFor="intakeReviewNotes" className="block text-xs font-semibold uppercase tracking-wide text-[color:var(--muted)]">
-              Intake Review Notes (Ops)
-            </label>
-            <p className="mt-1 text-xs text-[color:var(--muted)]">
-              Internal notes for reviewing this intake submission. Not shown to clients.
-            </p>
-            <textarea
-              id="intakeReviewNotes"
-              name="notes"
-              defaultValue={caseItem.intakeReviewNotes || ""}
-              rows={4}
-              placeholder="Add your intake review summary, risks, and next actions..."
-              className="mt-2 w-full rounded-md border border-[color:var(--border)] px-3 py-2 text-sm"
-            />
-            <button
-              type="submit"
-              className="mt-2 rounded-md border border-[color:var(--border)] px-3 py-2 text-xs font-semibold uppercase tracking-wide hover:bg-[color:var(--accent-soft)]"
+              <div className="mt-4 grid gap-3 md:grid-cols-2">
+                <div className="rounded-lg border border-[color:var(--border)] bg-[color:var(--accent-soft)]/35 p-3">
+                  <p className="text-[11px] font-semibold uppercase tracking-wide text-[color:var(--muted)]">
+                    Main issue
+                  </p>
+                  <p className="mt-1 text-sm">{intakeProfileSnapshot?.mainIssue || "Not provided"}</p>
+                </div>
+                <div className="rounded-lg border border-[color:var(--border)] bg-[color:var(--accent-soft)]/35 p-3">
+                  <p className="text-[11px] font-semibold uppercase tracking-wide text-[color:var(--muted)]">
+                    Issue duration
+                  </p>
+                  <p className="mt-1 text-sm">{intakeProfileSnapshot?.issueDuration || "Not provided"}</p>
+                </div>
+                <div className="rounded-lg border border-[color:var(--border)] bg-[color:var(--accent-soft)]/35 p-3">
+                  <p className="text-[11px] font-semibold uppercase tracking-wide text-[color:var(--muted)]">
+                    Preferred location
+                  </p>
+                  <p className="mt-1 text-sm">
+                    {intakeProfileSnapshot?.preferredLocation || "Not provided"}
+                  </p>
+                </div>
+                <div className="rounded-lg border border-[color:var(--border)] bg-[color:var(--accent-soft)]/35 p-3">
+                  <p className="text-[11px] font-semibold uppercase tracking-wide text-[color:var(--muted)]">
+                    Online sessions
+                  </p>
+                  <p className="mt-1 text-sm">{intakeProfileSnapshot?.onlinePreference || "Not provided"}</p>
+                </div>
+              </div>
+            </article>
+
+            <form
+              action={updateCaseIntakeReviewNotesAction}
+              className="rounded-xl border border-[color:var(--border)] bg-white p-4 xl:col-span-4"
             >
-              Save Intake Notes
-            </button>
-          </form>
-
-          <div className="mt-3 max-h-[32rem] overflow-auto rounded-lg border border-[color:var(--border)]">
-            <table className="min-w-full divide-y divide-[color:var(--border)] text-xs">
-              <thead className="bg-slate-50 text-left">
-                <tr>
-                  <th className="px-3 py-2 font-semibold">Field</th>
-                  <th className="px-3 py-2 font-semibold">Submitted value</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-[color:var(--border)]">
-                {intakeFieldRows.map((row, index) => (
-                  <tr key={`${row.path}:${index}`}>
-                    <td className="px-3 py-2">
-                      <p className="font-medium">{formatIntakeFieldLabel(row.path)}</p>
-                      <p className="mt-0.5 font-mono text-[11px] text-[color:var(--muted)]">
-                        {row.path}
-                      </p>
-                    </td>
-                    <td className="px-3 py-2 whitespace-pre-wrap break-words">
-                      {formatIntakeFieldValue(row.path, row.rawValue)}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+              <input type="hidden" name="caseId" value={caseItem.id} />
+              <input type="hidden" name="redirectTo" value={panelHref("intake")} />
+              <label
+                htmlFor="intakeReviewNotes"
+                className="block text-xs font-semibold uppercase tracking-wide text-[color:var(--muted)]"
+              >
+                Intake Review Notes (Ops)
+              </label>
+              <p className="mt-1 text-xs text-[color:var(--muted)]">
+                Internal notes for risk review and triage. Not shown to clients.
+              </p>
+              <textarea
+                id="intakeReviewNotes"
+                name="notes"
+                defaultValue={caseItem.intakeReviewNotes || ""}
+                rows={10}
+                placeholder="Add review summary, risk observations, and next actions..."
+                className="mt-2 w-full rounded-md border border-[color:var(--border)] px-3 py-2 text-sm"
+              />
+              <button
+                type="submit"
+                className="mt-2 rounded-md border border-[color:var(--border)] px-3 py-2 text-xs font-semibold uppercase tracking-wide hover:bg-[color:var(--accent-soft)]"
+              >
+                Save Intake Notes
+              </button>
+            </form>
           </div>
+
+          {intakeDisplayGroups.length === 0 ? (
+            <p className="mt-4 rounded-lg border border-[color:var(--border)] bg-white px-3 py-2 text-sm text-[color:var(--muted)]">
+              No intake responses are currently stored for this case.
+            </p>
+          ) : (
+            <div className="mt-4 grid gap-3 xl:grid-cols-2">
+              {intakeDisplayGroups.map((group) => (
+                <details
+                  key={group.key}
+                  open={group.defaultOpen}
+                  className="overflow-hidden rounded-xl border border-[color:var(--border)] bg-white"
+                >
+                  <summary className="cursor-pointer px-4 py-3">
+                    <p className="text-xs font-semibold uppercase tracking-wide text-[color:var(--muted)]">
+                      {group.label}
+                    </p>
+                    <p className="mt-1 text-xs text-[color:var(--muted)]">
+                      {group.rows.length} response{group.rows.length === 1 ? "" : "s"}
+                    </p>
+                  </summary>
+                  <div className="grid gap-2 border-t border-[color:var(--border)] p-3">
+                    {group.rows.map((row, index) => (
+                      <article
+                        key={`${group.key}:${row.path}:${index}`}
+                        className="rounded-lg border border-[color:var(--border)] bg-[color:var(--accent-soft)]/35 p-3"
+                      >
+                        <p className="text-[11px] font-semibold uppercase tracking-wide text-[color:var(--muted)]">
+                          {row.label}
+                        </p>
+                        <p className="mt-1 whitespace-pre-wrap break-words text-sm">{row.response}</p>
+                      </article>
+                    ))}
+                  </div>
+                </details>
+              ))}
+            </div>
+          )}
 
           {intakePayloadJson ? (
             <details className="mt-3 rounded-lg border border-[color:var(--border)] p-3">
               <summary className="cursor-pointer text-xs font-semibold uppercase tracking-wide text-[color:var(--muted)]">
-                Raw intake payload (JSON)
+                Technical Payload (JSON)
               </summary>
               <pre className="mt-2 max-h-80 overflow-auto rounded bg-slate-50 p-2 text-xs">
                 {intakePayloadJson}
