@@ -88,6 +88,23 @@ function appendQuery(path: string, key: string, value: string) {
   return `${path}${separator}${encodeURIComponent(key)}=${encodeURIComponent(value)}`;
 }
 
+function isNextRedirectError(error: unknown): error is { digest: string } {
+  if (!error || typeof error !== "object" || !("digest" in error)) {
+    return false;
+  }
+
+  const digest = (error as { digest?: unknown }).digest;
+  return typeof digest === "string" && digest.startsWith("NEXT_REDIRECT");
+}
+
+function redirectWithActionError(redirectTo: string, error: unknown): never {
+  if (isNextRedirectError(error)) {
+    throw error;
+  }
+
+  redirect(encodeErrorPath(redirectTo, domainErrorMessage(error)));
+}
+
 function parsePositiveIntegerField(
   formData: FormData,
   key: string,
@@ -210,7 +227,7 @@ export async function autoAllocateCaseAction(formData: FormData) {
     revalidatePath(redirectTo);
     redirect(redirectTo);
   } catch (error) {
-    redirect(encodeErrorPath(redirectTo, domainErrorMessage(error)));
+    redirectWithActionError(redirectTo, error);
   }
 }
 
@@ -237,7 +254,7 @@ export async function transitionCaseAction(formData: FormData) {
     revalidatePath(redirectTo);
     redirect(redirectTo);
   } catch (error) {
-    redirect(encodeErrorPath(redirectTo, domainErrorMessage(error)));
+    redirectWithActionError(redirectTo, error);
   }
 }
 
@@ -263,7 +280,7 @@ export async function updateCaseIntakeReviewNotesAction(formData: FormData) {
     revalidatePath(redirectTo);
     redirect(appendQuery(redirectTo, "intakeNotesSaved", "1"));
   } catch (error) {
-    redirect(encodeErrorPath(redirectTo, domainErrorMessage(error)));
+    redirectWithActionError(redirectTo, error);
   }
 }
 
@@ -278,7 +295,7 @@ export async function completeDocumentAction(formData: FormData) {
     revalidatePath(redirectTo);
     redirect(redirectTo);
   } catch (error) {
-    redirect(encodeErrorPath(redirectTo, domainErrorMessage(error)));
+    redirectWithActionError(redirectTo, error);
   }
 }
 
@@ -321,7 +338,7 @@ export async function overrideAssignmentAction(formData: FormData) {
     revalidatePath(redirectTo);
     redirect(redirectTo);
   } catch (error) {
-    redirect(encodeErrorPath(redirectTo, domainErrorMessage(error)));
+    redirectWithActionError(redirectTo, error);
   }
 }
 
@@ -353,7 +370,7 @@ export async function createSpecialistAction(formData: FormData) {
       max: 23,
     });
   } catch (error) {
-    redirect(encodeErrorPath(redirectTo, domainErrorMessage(error)));
+    redirectWithActionError(redirectTo, error);
   }
 
   if (!name || !email || !calUserId || !calIndividualEventTypeId) {
@@ -401,6 +418,10 @@ export async function createSpecialistAction(formData: FormData) {
     revalidatePath("/admin/specialists");
     redirect(redirectTo);
   } catch (error) {
+    if (isNextRedirectError(error)) {
+      throw error;
+    }
+
     if (isDomainError(error)) {
       redirect(encodeErrorPath(redirectTo, error.message));
     }
@@ -438,7 +459,7 @@ export async function updateSpecialistProfileAction(formData: FormData) {
       max: 23,
     });
   } catch (error) {
-    redirect(encodeErrorPath(redirectTo, domainErrorMessage(error)));
+    redirectWithActionError(redirectTo, error);
   }
 
   if (!specialistId || !name || !email || !calUserId || !calIndividualEventTypeId) {
@@ -752,7 +773,7 @@ export async function updateOperationalSettingsAction(formData: FormData) {
       user.id,
     );
   } catch (error) {
-    redirect(encodeErrorPath(redirectTo, domainErrorMessage(error)));
+    redirectWithActionError(redirectTo, error);
   }
 
   revalidatePath("/admin/settings");
@@ -850,7 +871,7 @@ export async function issueFormPinAction(formData: FormData) {
       }
     }
   } catch (error) {
-    redirect(encodeErrorPath(redirectTo, domainErrorMessage(error)));
+    redirectWithActionError(redirectTo, error);
   }
 
   if (!issued) {
@@ -896,7 +917,7 @@ export async function revokeFormPinAction(formData: FormData) {
       reason: reason || undefined,
     });
   } catch (error) {
-    redirect(encodeErrorPath(redirectTo, domainErrorMessage(error)));
+    redirectWithActionError(redirectTo, error);
   }
 
   if (!revoked) {
@@ -973,7 +994,7 @@ export async function issueIntakeAccessInviteAction(formData: FormData) {
     revalidatePath("/admin/cases");
     redirect(destination);
   } catch (error) {
-    redirect(encodeErrorPath(redirectTo, domainErrorMessage(error)));
+    redirectWithActionError(redirectTo, error);
   }
 }
 
@@ -1004,7 +1025,7 @@ export async function createWorkflowTemplateAction(formData: FormData) {
     revalidatePath("/admin/cases");
     redirect(redirectTo);
   } catch (error) {
-    redirect(encodeErrorPath(redirectTo, domainErrorMessage(error)));
+    redirectWithActionError(redirectTo, error);
   }
 }
 
@@ -1068,7 +1089,7 @@ export async function addWorkflowStepAction(formData: FormData) {
     revalidatePath("/admin/cases");
     redirect(redirectTo);
   } catch (error) {
-    redirect(encodeErrorPath(redirectTo, domainErrorMessage(error)));
+    redirectWithActionError(redirectTo, error);
   }
 }
 
@@ -1123,6 +1144,6 @@ export async function updateWorkflowStepAction(formData: FormData) {
     revalidatePath("/admin/cases");
     redirect(redirectTo);
   } catch (error) {
-    redirect(encodeErrorPath(redirectTo, domainErrorMessage(error)));
+    redirectWithActionError(redirectTo, error);
   }
 }
