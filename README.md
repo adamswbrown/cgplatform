@@ -355,6 +355,26 @@ Specialist:
 2. Open session briefing pages with participants, case notes, submitted documents, flags, and previous sessions.
 3. Deliver counselling sessions according to scheduled bookings and case lifecycle state.
 
+## Documentation Portal (GitHub Pages)
+
+Persona and feature documentation is now available as a GitHub Pages-ready site in `/docs`.
+
+Core docs:
+
+- [`docs/index.md`](docs/index.md)
+- [`docs/personas.md`](docs/personas.md)
+- [`docs/ops-manager.md`](docs/ops-manager.md)
+- [`docs/counsellor.md`](docs/counsellor.md)
+- [`docs/end-client.md`](docs/end-client.md)
+- [`docs/functionality-reference.md`](docs/functionality-reference.md)
+
+Publish from GitHub:
+
+1. Open repository `Settings` -> `Pages`.
+2. Set source to `Deploy from a branch`.
+3. Choose branch `main` and folder `/docs`.
+4. Save to publish the docs site.
+
 ## Persona UI Screenshots
 
 Full gallery with all captured stages:

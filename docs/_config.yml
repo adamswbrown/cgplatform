@@ -1,0 +1,15 @@
+title: CG Platform Documentation
+description: Persona guides and functionality reference for the counselling workflow platform.
+theme: minima
+markdown: kramdown
+kramdown:
+  input: GFM
+header_pages:
+  - index.md
+  - personas.md
+  - ops-manager.md
+  - counsellor.md
+  - end-client.md
+  - functionality-reference.md
+  - PERSONA_UI_SCREENSHOTS.md
+  - E2E_VERIFICATION_REPORT.md

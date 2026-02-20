@@ -21,6 +21,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Docs
 - Updated README configuration and workflow notes for counsellor standard working hours.
+- Added a GitHub Pages-ready documentation portal under `docs/` with persona playbooks and functionality reference.
 
 ## [0.2.0] - 2026-02-19
 

@@ -2,6 +2,14 @@
 
 This document captures key UI stages for each persona using Playwright against seeded local data.
 
+Related docs:
+
+- [Documentation Home](./index.md)
+- [Persona Overview](./personas.md)
+- [Ops Manager Guide](./ops-manager.md)
+- [Counsellor Guide](./counsellor.md)
+- [End Client Guide](./end-client.md)
+
 - Generated: 2026-02-19 (local)
 - Base URL: `http://127.0.0.1:3001`
 - Source manifest: `docs/screenshots/personas/manifest.json`
