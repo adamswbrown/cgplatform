@@ -14,6 +14,7 @@ export type OperationalSettings = {
   defaultCoupleSessionMinutes: number;
   defaultSpecialistStandardStartHour: number;
   defaultSpecialistStandardEndHour: number;
+  requireTermsBeforeScheduling: boolean;
   requireTermsBeforeInSession: boolean;
   requireOuttakeBeforeClose: boolean;
   manualProviderHorizonDays: number;
@@ -39,6 +40,7 @@ const DEFAULT_OPERATIONAL_SETTINGS: OperationalSettings = {
   defaultCoupleSessionMinutes: 60,
   defaultSpecialistStandardStartHour: 9,
   defaultSpecialistStandardEndHour: 18,
+  requireTermsBeforeScheduling: true,
   requireTermsBeforeInSession: true,
   requireOuttakeBeforeClose: true,
   manualProviderHorizonDays: 14,
@@ -279,6 +281,10 @@ function normalizeOperationalSettings(candidate: unknown): OperationalSettings {
     ),
     defaultSpecialistStandardStartHour,
     defaultSpecialistStandardEndHour,
+    requireTermsBeforeScheduling: normalizeBoolean(
+      parsed.requireTermsBeforeScheduling,
+      DEFAULT_OPERATIONAL_SETTINGS.requireTermsBeforeScheduling,
+    ),
     requireTermsBeforeInSession: normalizeBoolean(
       parsed.requireTermsBeforeInSession,
       DEFAULT_OPERATIONAL_SETTINGS.requireTermsBeforeInSession,

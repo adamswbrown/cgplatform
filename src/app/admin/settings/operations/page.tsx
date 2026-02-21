@@ -117,7 +117,21 @@ export default async function OperationalSettingsPage({
             </div>
           </div>
 
-          <div className="grid gap-4 md:grid-cols-2">
+          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+            <label className="flex items-start gap-3 rounded-xl border border-slate-200 bg-white px-3 py-3 text-sm">
+              <input
+                id="requireTermsBeforeScheduling"
+                name="requireTermsBeforeScheduling"
+                type="checkbox"
+                defaultChecked={settings.requireTermsBeforeScheduling}
+                className="mt-0.5 h-4 w-4"
+              />
+              <span>
+                <strong>Require Terms &amp; Counselling completion before scheduling</strong>
+                <br />
+                Cases cannot be scheduled until Terms of Counselling is completed.
+              </span>
+            </label>
             <label className="flex items-start gap-3 rounded-xl border border-slate-200 bg-white px-3 py-3 text-sm">
               <input
                 id="requireTermsBeforeInSession"
