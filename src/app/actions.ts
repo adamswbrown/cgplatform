@@ -680,6 +680,8 @@ export async function updateOperationalSettingsAction(formData: FormData) {
         schedulingEngineType,
         schedulingAssignmentMode,
         defaultIntakeSource,
+        requireTermsBeforeScheduling:
+          String(formData.get("requireTermsBeforeScheduling") || "") === "on",
         requireTermsBeforeInSession:
           String(formData.get("requireTermsBeforeInSession") || "") === "on",
         requireOuttakeBeforeClose:
