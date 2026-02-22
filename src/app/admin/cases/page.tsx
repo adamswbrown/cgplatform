@@ -201,17 +201,18 @@ export default async function AdminCasesPage({ searchParams }: AdminCasesPagePro
             const count = filterCounts[filter.key as keyof typeof filterCounts];
             const isActive = activeFilter === filter.key;
             return (
-              <Link
-                key={filter.key}
-                href={filter.key === "all" ? "/admin/cases" : `/admin/cases?filter=${filter.key}`}
-                className={
-                  isActive
-                    ? "inline-flex items-center gap-1.5 rounded-full border border-[color:var(--cg-ink)] bg-[color:var(--cg-ink)] px-3 py-1.5 text-xs font-semibold text-white"
-                    : "inline-flex items-center gap-1.5 rounded-full border border-[color:var(--border)] px-3 py-1.5 text-xs font-medium text-[color:var(--cg-ink)] hover:bg-[color:var(--accent-soft)]"
-                }
-              >
-                {filter.label}
-                <span
+                <Link
+                  key={filter.key}
+                  href={filter.key === "all" ? "/admin/cases" : `/admin/cases?filter=${filter.key}`}
+                  style={isActive ? { color: "var(--cg-white)" } : undefined}
+                  className={
+                    isActive
+                      ? "inline-flex items-center gap-1.5 rounded-full border border-[color:var(--cg-ink)] bg-[color:var(--cg-ink)] px-3 py-1.5 text-xs font-semibold"
+                      : "inline-flex items-center gap-1.5 rounded-full border border-[color:var(--border)] px-3 py-1.5 text-xs font-medium text-[color:var(--cg-ink)] hover:bg-[color:var(--accent-soft)]"
+                  }
+                >
+                  <span style={isActive ? { color: "var(--cg-white)" } : undefined}>{filter.label}</span>
+                  <span
                   className={isActive
                     ? "inline-flex min-w-[1.25rem] items-center justify-center rounded-full px-1.5 py-0.5 text-[10px] font-bold"
                     : "rounded-full bg-[color:var(--accent-soft)] px-1.5 py-0.5 text-[10px] font-semibold text-[color:var(--cg-ink)]"
