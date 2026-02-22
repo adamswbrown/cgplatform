@@ -1,10 +1,10 @@
 import { NextResponse } from "next/server";
-import { UserRole } from "@prisma/client";
+import { EmailStatus, EmailType, UserRole } from "@prisma/client";
 import { z } from "zod";
 import { requireApiUser } from "@/lib/auth";
 import { appendCaseAuditLog, domainErrorMessage, isDomainError } from "@/lib/case-service";
 import { issueFormPin } from "@/lib/form-access";
-import { sendFormPinEmail } from "@/lib/mailer";
+import { logEmail, sendFormPinEmail } from "@/lib/mailer";
 
 const issueSchema = z
   .object({
@@ -53,8 +53,32 @@ export async function POST(request: Request) {
           expiresAt: issued.expiresAt,
         });
         emailDelivered = email.delivered;
+        await logEmail({
+          caseId: issued.caseId,
+          clientId: issued.clientId,
+          emailType: EmailType.FORM_PIN,
+          recipientEmail: issued.participantEmail,
+          recipientName: issued.participantName,
+          subject: email.subject,
+          status: email.delivered ? EmailStatus.SENT : EmailStatus.FAILED,
+          relatedFormType: issued.formType,
+          relatedFormAccessPinId: issued.pinId,
+          providerMessageId: email.providerMessageId,
+        });
       } catch (error) {
         emailError = domainErrorMessage(error);
+        await logEmail({
+          caseId: issued.caseId,
+          clientId: issued.clientId,
+          emailType: EmailType.FORM_PIN,
+          recipientEmail: issued.participantEmail,
+          recipientName: issued.participantName,
+          subject: "Your counselling form access PIN",
+          status: EmailStatus.FAILED,
+          relatedFormType: issued.formType,
+          relatedFormAccessPinId: issued.pinId,
+          error: emailError,
+        });
         await appendCaseAuditLog({
           caseId: issued.caseId,
           userId: user.id,

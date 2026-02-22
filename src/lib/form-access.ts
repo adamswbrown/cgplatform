@@ -183,9 +183,11 @@ export type IssueFormPinInput = {
 export type IssueFormPinResult = {
   accessKey: string;
   pin: string;
+  pinId: string;
   formType: string;
   formPath: string;
   caseId: string;
+  clientId: string;
   caseReference: string;
   participantEmail: string;
   participantName: string;
@@ -247,6 +249,8 @@ export async function issueFormPin(input: IssueFormPinInput): Promise<IssueFormP
   const pin = generatePin(DEFAULT_PIN_DIGITS);
   const expiresAt = new Date(Date.now() + expiresInHours * 60 * 60 * 1000);
 
+  let pinRecord: { id: string };
+
   await db.$transaction(async (tx) => {
     await tx.formAccessPin.updateMany({
       where: {
@@ -263,7 +267,7 @@ export async function issueFormPin(input: IssueFormPinInput): Promise<IssueFormP
       },
     });
 
-    await tx.formAccessPin.create({
+    pinRecord = await tx.formAccessPin.create({
       data: {
         caseId,
         clientId: participant.client.id,
@@ -299,9 +303,11 @@ export async function issueFormPin(input: IssueFormPinInput): Promise<IssueFormP
   return {
     accessKey,
     pin,
+    pinId: pinRecord!.id,
     formType,
     formPath,
     caseId,
+    clientId: participant.client.id,
     caseReference: caseRecord.reference,
     participantEmail: participant.client.email,
     participantName: `${participant.client.firstName} ${participant.client.lastName}`,
@@ -646,6 +652,7 @@ export type IssueIntakeAccessInviteInput = {
 };
 
 export type IssueIntakeAccessInviteResult = {
+  inviteId: string;
   recipientEmail: string;
   recipientName: string | null;
   accessKey: string;
@@ -677,6 +684,8 @@ export async function issueIntakeAccessInvite(
   const pin = generatePin(DEFAULT_PIN_DIGITS);
   const expiresAt = new Date(Date.now() + expiresInHours * 60 * 60 * 1000);
 
+  let inviteRecord: { id: string };
+
   await db.$transaction(async (tx) => {
     await tx.intakeAccessInvite.updateMany({
       where: {
@@ -691,7 +700,7 @@ export async function issueIntakeAccessInvite(
       },
     });
 
-    await tx.intakeAccessInvite.create({
+    inviteRecord = await tx.intakeAccessInvite.create({
       data: {
         recipientEmail,
         recipientName,
@@ -706,6 +715,7 @@ export async function issueIntakeAccessInvite(
   });
 
   return {
+    inviteId: inviteRecord!.id,
     recipientEmail,
     recipientName,
     accessKey,

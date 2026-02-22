@@ -76,6 +76,7 @@ model Client {
   participants CaseParticipant[]
   availabilityWindows CaseAvailabilityWindow[]
   formAccessPins FormAccessPin[]
+  emailLogs    EmailLog[]
   createdAt    DateTime          @default(now())
   updatedAt    DateTime          @updatedAt
 }
@@ -107,6 +108,7 @@ model Case {
   sessions             Session[]
   documents            DocumentInstance[]
   formAccessPins       FormAccessPin[]
+  emailLogs            EmailLog[]
   auditLogs            AuditLog[]
   createdAt            DateTime           @default(now())
   updatedAt            DateTime           @updatedAt
@@ -393,6 +395,45 @@ model FormAccessPin {
   @@index([caseId, formType, expiresAt])
   @@index([clientId, formType, expiresAt])
   @@index([expiresAt])
+}
+
+enum EmailType {
+  INTAKE_CONFIRMATION
+  FORM_PIN
+  INTAKE_ACCESS_INVITE
+}
+
+enum EmailStatus {
+  SENT
+  FAILED
+}
+
+model EmailLog {
+  id                        String      @id @default(cuid())
+  caseId                    String?
+  clientId                  String?
+  emailType                 EmailType
+  recipientEmail            String
+  recipientName             String?
+  subject                   String
+  status                    EmailStatus
+  relatedFormType           String?
+  relatedFormAccessPinId    String?
+  relatedIntakeInviteId     String?
+  providerMessageId         String?
+  error                     String?
+  respondedAt               DateTime?
+  sentAt                    DateTime    @default(now())
+  case                      Case?       @relation(fields: [caseId], references: [id], onDelete: SetNull)
+  client                    Client?     @relation(fields: [clientId], references: [id], onDelete: SetNull)
+  createdAt                 DateTime    @default(now())
+  updatedAt                 DateTime    @updatedAt
+
+  @@index([caseId, sentAt])
+  @@index([recipientEmail, emailType])
+  @@index([relatedFormAccessPinId])
+  @@index([relatedIntakeInviteId])
+  @@index([caseId, respondedAt])
 }
 
 model SpecialistAvailabilityWindow {

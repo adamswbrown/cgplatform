@@ -10,6 +10,7 @@ import {
 } from "@/lib/case-service";
 import { db } from "@/lib/db";
 import { hasValidFormAccessSession } from "@/lib/form-access";
+import { markEmailsResponded } from "@/lib/email-tracking";
 
 const AVAILABILITY_SUBMISSION_FORM_TYPE = "AVAILABILITY_SUBMISSION";
 
@@ -200,6 +201,12 @@ export async function POST(request: Request) {
       metadata,
       source: payload.source || "external_form",
     });
+
+    await markEmailsResponded({
+      caseId: result.caseId,
+      recipientEmail: payload.participantIdentifier,
+      formType: payload.formType,
+    }).catch(() => {});
 
     return NextResponse.json(
       {

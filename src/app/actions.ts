@@ -1,6 +1,6 @@
 "use server";
 
-import { CaseStatus, UserRole, WorkflowStepCode } from "@prisma/client";
+import { CaseStatus, EmailStatus, EmailType, UserRole, WorkflowStepCode } from "@prisma/client";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { z } from "zod";
@@ -36,7 +36,7 @@ import {
 } from "@/lib/admin-settings";
 import { issueFormPin, issueIntakeAccessInvite, revokeFormPin } from "@/lib/form-access";
 import { updateIntakeFormContent } from "@/lib/intake-settings";
-import { sendFormPinEmail, sendIntakeAccessInviteEmail } from "@/lib/mailer";
+import { logEmail, sendFormPinEmail, sendIntakeAccessInviteEmail } from "@/lib/mailer";
 
 const intakeSchema = z
   .object({
@@ -681,6 +681,8 @@ export async function updateOperationalSettingsAction(formData: FormData) {
         schedulingEngineType,
         schedulingAssignmentMode,
         defaultIntakeSource,
+        requireTermsBeforeScheduling:
+          String(formData.get("requireTermsBeforeScheduling") || "") === "on",
         requireTermsBeforeInSession:
           String(formData.get("requireTermsBeforeInSession") || "") === "on",
         requireOuttakeBeforeClose:
@@ -867,8 +869,32 @@ export async function issueFormPinAction(formData: FormData) {
           expiresAt: issued.expiresAt,
         });
         emailDelivered = result.delivered;
+        await logEmail({
+          caseId: issued.caseId,
+          clientId: issued.clientId,
+          emailType: EmailType.FORM_PIN,
+          recipientEmail: issued.participantEmail,
+          recipientName: issued.participantName,
+          subject: result.subject,
+          status: result.delivered ? EmailStatus.SENT : EmailStatus.FAILED,
+          relatedFormType: issued.formType,
+          relatedFormAccessPinId: issued.pinId,
+          providerMessageId: result.providerMessageId,
+        });
       } catch (error) {
         emailError = domainErrorMessage(error);
+        await logEmail({
+          caseId: issued.caseId,
+          clientId: issued.clientId,
+          emailType: EmailType.FORM_PIN,
+          recipientEmail: issued.participantEmail,
+          recipientName: issued.participantName,
+          subject: "Your counselling form access PIN",
+          status: EmailStatus.FAILED,
+          relatedFormType: issued.formType,
+          relatedFormAccessPinId: issued.pinId,
+          error: emailError,
+        });
       }
     }
   } catch (error) {
@@ -975,8 +1001,26 @@ export async function issueIntakeAccessInviteAction(formData: FormData) {
           expiresAt: issued.expiresAt,
         });
         emailDelivered = result.delivered;
+        await logEmail({
+          emailType: EmailType.INTAKE_ACCESS_INVITE,
+          recipientEmail: issued.recipientEmail,
+          recipientName: issued.recipientName || undefined,
+          subject: result.subject,
+          status: result.delivered ? EmailStatus.SENT : EmailStatus.FAILED,
+          relatedIntakeInviteId: issued.inviteId,
+          providerMessageId: result.providerMessageId,
+        });
       } catch (error) {
         emailError = domainErrorMessage(error);
+        await logEmail({
+          emailType: EmailType.INTAKE_ACCESS_INVITE,
+          recipientEmail: issued.recipientEmail,
+          recipientName: issued.recipientName || undefined,
+          subject: "Your secure counselling intake form link",
+          status: EmailStatus.FAILED,
+          relatedIntakeInviteId: issued.inviteId,
+          error: emailError,
+        });
       }
     }
 

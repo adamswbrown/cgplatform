@@ -118,11 +118,11 @@ export function TermsOfCounsellingForm({
     setError(null);
 
     if (!acceptedTerms) {
-      setError("Please confirm you accept the terms of counselling.");
+      setError("Please confirm you agree to the terms of counselling.");
       return;
     }
     if (!acceptedDataPolicy) {
-      setError("Please confirm the client declaration.");
+      setError("Please confirm your consent for Special Category Information.");
       return;
     }
     if (!printedName.trim()) {
@@ -206,7 +206,8 @@ export function TermsOfCounsellingForm({
             onChange={(event) => setAcceptedTerms(event.target.checked)}
             className="mt-0.5"
           />
-          I have read and understood the Terms of Counselling and agree to proceed.
+          I agree to the terms set out in this document and will co-operate, to the best
+          of my ability, with my Counsellor.
         </label>
 
         <label className="mt-3 flex items-start gap-2 text-sm">
@@ -217,8 +218,8 @@ export function TermsOfCounsellingForm({
             onChange={(event) => setAcceptedDataPolicy(event.target.checked)}
             className="mt-0.5"
           />
-          I give permission for Christian Guidelines to gather and securely process this
-          declaration and related counselling data.
+          I give explicit consent for my Counsellor to gather and record such Special
+          Category Information as might be considered essential to this process of counselling.
         </label>
       </div>
 

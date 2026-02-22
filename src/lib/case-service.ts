@@ -91,6 +91,10 @@ const ACTIVE_SESSION_STATUSES = [SessionStatus.SCHEDULED, SessionStatus.IN_SESSI
 const AVAILABILITY_SUBMISSION_FORM_TYPE = "AVAILABILITY_SUBMISSION";
 const AVAILABILITY_CAPTURED_STEP_CODE: WorkflowStepCode = WorkflowStepCode.AVAILABILITY_CAPTURED;
 const TERMS_SUBMISSION_ALLOWED_STATUSES: CaseStatus[] = [
+  CaseStatus.AWAITING_REVIEW,
+  CaseStatus.MATCHED,
+  CaseStatus.AGREEMENT_PENDING,
+  CaseStatus.READY_TO_SCHEDULE,
   CaseStatus.SCHEDULED,
   CaseStatus.IN_SESSION,
   CaseStatus.COMPLETED,
@@ -1033,6 +1037,12 @@ async function ensureRequiredDocumentsCompleted(
 async function resolveRequiredDocumentCodesForStatus(status: CaseStatus) {
   const operationalSettings = await getOperationalSettings();
 
+  if (status === CaseStatus.READY_TO_SCHEDULE || status === CaseStatus.SCHEDULED) {
+    return operationalSettings.requireTermsBeforeScheduling
+      ? [DOCUMENT_CODES.TERMS_AND_CONDITIONS]
+      : [];
+  }
+
   if (status === CaseStatus.IN_SESSION) {
     return operationalSettings.requireTermsBeforeInSession
       ? [DOCUMENT_CODES.TERMS_AND_CONDITIONS]
@@ -1355,6 +1365,15 @@ export async function createCaseFromIntake(
       intakeDocumentTriggerStatus,
       undefined,
     );
+
+    if (intakeDocumentTriggerStatus !== initialStatus) {
+      await sendDocumentsForStatus(
+        tx,
+        caseRecord.id,
+        initialStatus,
+        undefined,
+      );
+    }
 
     await createAuditLog(tx, {
       caseId: caseRecord.id,
@@ -2731,6 +2750,12 @@ export async function getCaseDetails(caseId: string) {
           createdAt: "desc",
         },
         take: 25,
+      },
+      emailLogs: {
+        orderBy: {
+          sentAt: "desc",
+        },
+        take: 50,
       },
       auditLogs: {
         include: {
@@ -5604,7 +5629,7 @@ export async function ingestFormSubmission(input: {
       !TERMS_SUBMISSION_ALLOWED_STATUSES.includes(caseRecord.status)
     ) {
       throw new DomainError(
-        "Terms of Counselling can only be completed after a session has been booked.",
+        "Terms of Counselling can only be completed once an intake has been received.",
         409,
       );
     }
