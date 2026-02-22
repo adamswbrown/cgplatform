@@ -184,7 +184,7 @@ export function TermsOfCounsellingForm({
 
   if (submitted) {
     return (
-      <div className="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-800">
+      <div className="cg-alert cg-alert-success">
         {successMessage}
       </div>
     );
@@ -303,7 +303,7 @@ export function TermsOfCounsellingForm({
       </div>
 
       {error ? (
-        <p className="rounded-md border border-[color:var(--danger)] bg-red-50 px-3 py-2 text-sm text-[color:var(--danger)]">
+        <p className="cg-alert cg-alert-error">
           {error}
         </p>
       ) : null}

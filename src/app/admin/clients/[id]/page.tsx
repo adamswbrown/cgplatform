@@ -12,11 +12,61 @@ type ClientDetailPageProps = {
 
 type IntakeSummary = {
   participantType: string | null;
+  counsellingType: string | null;
   mainIssue: string | null;
+  otherDetails: string | null;
   issueDuration: string | null;
+  previousSupport: string | null;
+  previousSupportDetails: string | null;
+  suicidalThoughtsRecently: string | null;
+  suicidalThoughtsDetails: string | null;
+  attemptedSuicide: string | null;
+  attemptedSuicideDetails: string | null;
   location: string | null;
   includeOnline: boolean | null;
+  availabilityNotes: string | null;
   timePreferences: string[];
+  primary: {
+    title: string | null;
+    firstName: string | null;
+    lastName: string | null;
+    dateOfBirth: string | null;
+    gender: string | null;
+    email: string | null;
+    mainPhone: string | null;
+    secondPhone: string | null;
+    addressLine1: string | null;
+    addressLine2: string | null;
+    city: string | null;
+    county: string | null;
+    postcode: string | null;
+    countryIfNotUk: string | null;
+    churchConnection: string | null;
+    leadershipRole: string | null;
+    heardAbout: string | null;
+    heardAboutOtherDetail: string | null;
+    contactPreferences: string[];
+    emergencyContactFirstName: string | null;
+    emergencyContactLastName: string | null;
+    emergencyRelationship: string | null;
+    emergencyPhone: string | null;
+    gpSurgeryName: string | null;
+    gpSurgeryPhone: string | null;
+    gpDoctorName: string | null;
+  };
+  secondary: {
+    title: string | null;
+    firstName: string | null;
+    lastName: string | null;
+    dateOfBirth: string | null;
+    gender: string | null;
+    email: string | null;
+    mainPhone: string | null;
+  } | null;
+  consent: {
+    signatureType: string | null;
+    signedAt: string | null;
+  };
 };
 
 function asRecord(value: unknown): Record<string, unknown> | null {
@@ -41,35 +91,119 @@ function formatToken(value: string | null | undefined) {
   return formatStatus(value.toUpperCase());
 }
 
+function readStringArray(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((entry) => (typeof entry === "string" ? entry : null))
+    .filter((entry): entry is string => Boolean(entry));
+}
+
 function extractIntakeSummary(intakeFormData: unknown): IntakeSummary {
   const root = asRecord(intakeFormData);
-  if (!root) {
-    return {
-      participantType: null,
-      mainIssue: null,
-      issueDuration: null,
-      location: null,
-      includeOnline: null,
-      timePreferences: [],
-    };
-  }
+  const empty: IntakeSummary = {
+    participantType: null,
+    counsellingType: null,
+    mainIssue: null,
+    otherDetails: null,
+    issueDuration: null,
+    previousSupport: null,
+    previousSupportDetails: null,
+    suicidalThoughtsRecently: null,
+    suicidalThoughtsDetails: null,
+    attemptedSuicide: null,
+    attemptedSuicideDetails: null,
+    location: null,
+    includeOnline: null,
+    availabilityNotes: null,
+    timePreferences: [],
+    primary: {
+      title: null, firstName: null, lastName: null, dateOfBirth: null,
+      gender: null, email: null, mainPhone: null, secondPhone: null,
+      addressLine1: null, addressLine2: null, city: null, county: null,
+      postcode: null, countryIfNotUk: null, churchConnection: null,
+      leadershipRole: null, heardAbout: null, heardAboutOtherDetail: null,
+      contactPreferences: [], emergencyContactFirstName: null,
+      emergencyContactLastName: null, emergencyRelationship: null,
+      emergencyPhone: null, gpSurgeryName: null, gpSurgeryPhone: null,
+      gpDoctorName: null,
+    },
+    secondary: null,
+    consent: { signatureType: null, signedAt: null },
+  };
+
+  if (!root) return empty;
 
   const presenting = asRecord(root.presenting);
   const availability = asRecord(root.availability);
-  const rawTimePreferences = Array.isArray(availability?.timePreferences)
-    ? availability?.timePreferences
-    : [];
+  const primary = asRecord(root.primary);
+  const secondary = asRecord(root.secondary);
+  const consent = asRecord(root.consent);
+
+  const extractPrimary = (p: Record<string, unknown> | null) => {
+    if (!p) return empty.primary;
+    return {
+      title: readString(p.title),
+      firstName: readString(p.firstName),
+      lastName: readString(p.lastName),
+      dateOfBirth: readString(p.dateOfBirth),
+      gender: readString(p.gender),
+      email: readString(p.email),
+      mainPhone: readString(p.mainPhone),
+      secondPhone: readString(p.secondPhone),
+      addressLine1: readString(p.addressLine1),
+      addressLine2: readString(p.addressLine2),
+      city: readString(p.city),
+      county: readString(p.county),
+      postcode: readString(p.postcode),
+      countryIfNotUk: readString(p.countryIfNotUk),
+      churchConnection: readString(p.churchConnection),
+      leadershipRole: readString(p.leadershipRole),
+      heardAbout: readString(p.heardAbout),
+      heardAboutOtherDetail: readString(p.heardAboutOtherDetail),
+      contactPreferences: readStringArray(p.contactPreferences),
+      emergencyContactFirstName: readString(p.emergencyContactFirstName),
+      emergencyContactLastName: readString(p.emergencyContactLastName),
+      emergencyRelationship: readString(p.emergencyRelationship),
+      emergencyPhone: readString(p.emergencyPhone),
+      gpSurgeryName: readString(p.gpSurgeryName),
+      gpSurgeryPhone: readString(p.gpSurgeryPhone),
+      gpDoctorName: readString(p.gpDoctorName),
+    };
+  };
 
   return {
     participantType: readString(root.participantType),
+    counsellingType: readString(root.counsellingType),
     mainIssue: readString(presenting?.mainIssue),
+    otherDetails: readString(presenting?.otherDetails),
     issueDuration: readString(presenting?.issueDuration),
+    previousSupport: readString(presenting?.previousSupport),
+    previousSupportDetails: readString(presenting?.previousSupportDetails),
+    suicidalThoughtsRecently: readString(presenting?.suicidalThoughtsRecently),
+    suicidalThoughtsDetails: readString(presenting?.suicidalThoughtsDetails),
+    attemptedSuicide: readString(presenting?.attemptedSuicide),
+    attemptedSuicideDetails: readString(presenting?.attemptedSuicideDetails),
     location: readString(availability?.location),
     includeOnline:
       typeof availability?.includeOnline === "boolean" ? availability.includeOnline : null,
-    timePreferences: rawTimePreferences
-      .map((value) => (typeof value === "string" ? value : null))
-      .filter((value): value is string => Boolean(value)),
+    availabilityNotes: readString(availability?.notes),
+    timePreferences: readStringArray(availability?.timePreferences),
+    primary: extractPrimary(primary),
+    secondary: secondary
+      ? {
+          title: readString(secondary.title),
+          firstName: readString(secondary.firstName),
+          lastName: readString(secondary.lastName),
+          dateOfBirth: readString(secondary.dateOfBirth),
+          gender: readString(secondary.gender),
+          email: readString(secondary.email),
+          mainPhone: readString(secondary.mainPhone),
+        }
+      : null,
+    consent: {
+      signatureType: readString(consent?.signatureType),
+      signedAt: readString(consent?.signedAt),
+    },
   };
 }
 
@@ -125,6 +259,7 @@ export default async function ClientDetailPage({ params }: ClientDetailPageProps
       subtitle="Operations deep view of client details, submitted availability, secure access PINs, and related case records."
       userName={user.name}
       role={user.role}
+      currentPath="/admin/clients"
       navItems={[
         { href: "/admin/cases", label: "All Cases" },
         { href: "/admin/assignments", label: "Assignments" },
@@ -313,39 +448,7 @@ export default async function ClientDetailPage({ params }: ClientDetailPageProps
                   </div>
                 </div>
 
-                <div className="mt-3 grid gap-3 xl:grid-cols-3">
-                  <div className="rounded-lg border border-[color:var(--border)] bg-[color:var(--accent-soft)]/30 p-3">
-                    <p className="text-xs font-semibold uppercase tracking-wide text-[color:var(--muted)]">
-                      Intake Snapshot
-                    </p>
-                    <p className="mt-1 text-sm">
-                      Application type: {formatToken(intakeSummary.participantType)}
-                    </p>
-                    <p className="text-sm">
-                      Main issue: {formatToken(intakeSummary.mainIssue)}
-                    </p>
-                    <p className="text-sm">
-                      Duration: {intakeSummary.issueDuration || "Not provided"}
-                    </p>
-                    <p className="text-sm">
-                      Location: {formatToken(intakeSummary.location)}
-                    </p>
-                    <p className="text-sm">
-                      Online accepted:{" "}
-                      {intakeSummary.includeOnline === null
-                        ? "Not provided"
-                        : intakeSummary.includeOnline
-                          ? "Yes"
-                          : "No"}
-                    </p>
-                    <p className="text-sm">
-                      Time preferences:{" "}
-                      {intakeSummary.timePreferences.length > 0
-                        ? intakeSummary.timePreferences.map((entry) => formatToken(entry)).join(", ")
-                        : "Not provided"}
-                    </p>
-                  </div>
-
+                <div className="mt-3 grid gap-3 xl:grid-cols-2">
                   <div className="rounded-lg border border-[color:var(--border)] bg-[color:var(--accent-soft)]/30 p-3">
                     <p className="text-xs font-semibold uppercase tracking-wide text-[color:var(--muted)]">
                       Case Notes
@@ -371,6 +474,274 @@ export default async function ClientDetailPage({ params }: ClientDetailPageProps
                     </ul>
                   </div>
                 </div>
+
+                {/* Full Intake Form Data */}
+                {intakeSummary.primary.firstName ? (
+                  <details className="group mt-3 rounded-lg border border-[color:var(--border)] bg-white">
+                    <summary className="flex cursor-pointer items-center gap-2 px-4 py-3 text-sm font-semibold text-[color:var(--cg-ink)] hover:bg-[color:var(--accent-soft)]/30">
+                      <svg aria-hidden="true" viewBox="0 0 20 20" fill="currentColor" className="h-4 w-4 shrink-0 text-[color:var(--muted)] transition-transform group-open:rotate-90">
+                        <path fillRule="evenodd" d="M7.21 14.77a.75.75 0 0 1 .02-1.06L11.168 10 7.23 6.29a.75.75 0 1 1 1.04-1.08l4.5 4.25a.75.75 0 0 1 0 1.08l-4.5 4.25a.75.75 0 0 1-1.06-.02Z" clipRule="evenodd" />
+                      </svg>
+                      Intake Form Data
+                      <span className="ml-auto text-xs font-normal text-[color:var(--muted)]">
+                        {formatToken(intakeSummary.participantType)} • {formatToken(intakeSummary.counsellingType)}
+                      </span>
+                    </summary>
+                    <div className="border-t border-[color:var(--border)] px-4 py-4">
+                      <div className="grid gap-4 lg:grid-cols-2">
+                        {/* Primary Participant */}
+                        <div className="space-y-3">
+                          <div>
+                            <p className="text-xs font-semibold uppercase tracking-wide text-[color:var(--accent)]">
+                              Primary Participant
+                            </p>
+                            <div className="mt-2 grid grid-cols-2 gap-x-4 gap-y-1.5 text-sm">
+                              <div>
+                                <p className="text-[11px] text-[color:var(--muted)]">Name</p>
+                                <p>{[intakeSummary.primary.title, intakeSummary.primary.firstName, intakeSummary.primary.lastName].filter(Boolean).join(" ") || "Not provided"}</p>
+                              </div>
+                              <div>
+                                <p className="text-[11px] text-[color:var(--muted)]">Date of Birth</p>
+                                <p>{intakeSummary.primary.dateOfBirth || "Not provided"}</p>
+                              </div>
+                              <div>
+                                <p className="text-[11px] text-[color:var(--muted)]">Gender</p>
+                                <p>{formatToken(intakeSummary.primary.gender)}</p>
+                              </div>
+                              <div>
+                                <p className="text-[11px] text-[color:var(--muted)]">Email</p>
+                                <p>{intakeSummary.primary.email || "Not provided"}</p>
+                              </div>
+                              <div>
+                                <p className="text-[11px] text-[color:var(--muted)]">Main Phone</p>
+                                <p>{intakeSummary.primary.mainPhone || "Not provided"}</p>
+                              </div>
+                              <div>
+                                <p className="text-[11px] text-[color:var(--muted)]">Second Phone</p>
+                                <p>{intakeSummary.primary.secondPhone || "Not provided"}</p>
+                              </div>
+                            </div>
+                          </div>
+
+                          <div>
+                            <p className="text-[11px] font-semibold uppercase tracking-wide text-[color:var(--muted)]">Address</p>
+                            <p className="mt-1 text-sm">
+                              {[
+                                intakeSummary.primary.addressLine1,
+                                intakeSummary.primary.addressLine2,
+                                intakeSummary.primary.city,
+                                intakeSummary.primary.county,
+                                intakeSummary.primary.postcode,
+                                intakeSummary.primary.countryIfNotUk,
+                              ].filter(Boolean).join(", ") || "Not provided"}
+                            </p>
+                          </div>
+
+                          <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 text-sm">
+                            <div>
+                              <p className="text-[11px] text-[color:var(--muted)]">Church Connection</p>
+                              <p>{formatToken(intakeSummary.primary.churchConnection)}</p>
+                            </div>
+                            <div>
+                              <p className="text-[11px] text-[color:var(--muted)]">Leadership Role</p>
+                              <p>{formatToken(intakeSummary.primary.leadershipRole)}</p>
+                            </div>
+                            <div>
+                              <p className="text-[11px] text-[color:var(--muted)]">Heard About</p>
+                              <p>{formatToken(intakeSummary.primary.heardAbout)}{intakeSummary.primary.heardAboutOtherDetail ? ` (${intakeSummary.primary.heardAboutOtherDetail})` : ""}</p>
+                            </div>
+                            <div>
+                              <p className="text-[11px] text-[color:var(--muted)]">Contact Preferences</p>
+                              <p>{intakeSummary.primary.contactPreferences.length > 0 ? intakeSummary.primary.contactPreferences.map((entry) => formatToken(entry)).join(", ") : "Not provided"}</p>
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Emergency Contact & GP */}
+                        <div className="space-y-3">
+                          <div>
+                            <p className="text-xs font-semibold uppercase tracking-wide text-[color:var(--accent)]">
+                              Emergency Contact
+                            </p>
+                            <div className="mt-2 grid grid-cols-2 gap-x-4 gap-y-1.5 text-sm">
+                              <div>
+                                <p className="text-[11px] text-[color:var(--muted)]">Name</p>
+                                <p>{[intakeSummary.primary.emergencyContactFirstName, intakeSummary.primary.emergencyContactLastName].filter(Boolean).join(" ") || "Not provided"}</p>
+                              </div>
+                              <div>
+                                <p className="text-[11px] text-[color:var(--muted)]">Relationship</p>
+                                <p>{formatToken(intakeSummary.primary.emergencyRelationship)}</p>
+                              </div>
+                              <div className="col-span-2">
+                                <p className="text-[11px] text-[color:var(--muted)]">Phone</p>
+                                <p>{intakeSummary.primary.emergencyPhone || "Not provided"}</p>
+                              </div>
+                            </div>
+                          </div>
+
+                          <div>
+                            <p className="text-xs font-semibold uppercase tracking-wide text-[color:var(--accent)]">
+                              GP / Doctor
+                            </p>
+                            <div className="mt-2 grid grid-cols-2 gap-x-4 gap-y-1.5 text-sm">
+                              <div>
+                                <p className="text-[11px] text-[color:var(--muted)]">Surgery Name</p>
+                                <p>{intakeSummary.primary.gpSurgeryName || "Not provided"}</p>
+                              </div>
+                              <div>
+                                <p className="text-[11px] text-[color:var(--muted)]">Surgery Phone</p>
+                                <p>{intakeSummary.primary.gpSurgeryPhone || "Not provided"}</p>
+                              </div>
+                              <div className="col-span-2">
+                                <p className="text-[11px] text-[color:var(--muted)]">Doctor Name</p>
+                                <p>{intakeSummary.primary.gpDoctorName || "Not provided"}</p>
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* Secondary Participant (couples) */}
+                          {intakeSummary.secondary ? (
+                            <div>
+                              <p className="text-xs font-semibold uppercase tracking-wide text-[color:var(--accent)]">
+                                Secondary Participant
+                              </p>
+                              <div className="mt-2 grid grid-cols-2 gap-x-4 gap-y-1.5 text-sm">
+                                <div>
+                                  <p className="text-[11px] text-[color:var(--muted)]">Name</p>
+                                  <p>{[intakeSummary.secondary.title, intakeSummary.secondary.firstName, intakeSummary.secondary.lastName].filter(Boolean).join(" ") || "Not provided"}</p>
+                                </div>
+                                <div>
+                                  <p className="text-[11px] text-[color:var(--muted)]">Date of Birth</p>
+                                  <p>{intakeSummary.secondary.dateOfBirth || "Not provided"}</p>
+                                </div>
+                                <div>
+                                  <p className="text-[11px] text-[color:var(--muted)]">Gender</p>
+                                  <p>{formatToken(intakeSummary.secondary.gender)}</p>
+                                </div>
+                                <div>
+                                  <p className="text-[11px] text-[color:var(--muted)]">Email</p>
+                                  <p>{intakeSummary.secondary.email || "Not provided"}</p>
+                                </div>
+                                <div className="col-span-2">
+                                  <p className="text-[11px] text-[color:var(--muted)]">Phone</p>
+                                  <p>{intakeSummary.secondary.mainPhone || "Not provided"}</p>
+                                </div>
+                              </div>
+                            </div>
+                          ) : null}
+                        </div>
+                      </div>
+
+                      {/* Presenting Issues */}
+                      <div className="mt-4 rounded-lg border border-[color:var(--border)] bg-[color:var(--accent-soft)]/20 p-3">
+                        <p className="text-xs font-semibold uppercase tracking-wide text-[color:var(--accent)]">
+                          Presenting Issues
+                        </p>
+                        <div className="mt-2 grid gap-x-6 gap-y-2 text-sm lg:grid-cols-2">
+                          <div>
+                            <p className="text-[11px] text-[color:var(--muted)]">Main Issue</p>
+                            <p>{formatToken(intakeSummary.mainIssue)}</p>
+                          </div>
+                          <div>
+                            <p className="text-[11px] text-[color:var(--muted)]">Duration</p>
+                            <p>{intakeSummary.issueDuration || "Not provided"}</p>
+                          </div>
+                          {intakeSummary.otherDetails ? (
+                            <div className="lg:col-span-2">
+                              <p className="text-[11px] text-[color:var(--muted)]">Additional Details</p>
+                              <p>{intakeSummary.otherDetails}</p>
+                            </div>
+                          ) : null}
+                          <div>
+                            <p className="text-[11px] text-[color:var(--muted)]">Previous Support</p>
+                            <p>{formatToken(intakeSummary.previousSupport)}</p>
+                          </div>
+                          {intakeSummary.previousSupportDetails ? (
+                            <div>
+                              <p className="text-[11px] text-[color:var(--muted)]">Previous Support Details</p>
+                              <p>{intakeSummary.previousSupportDetails}</p>
+                            </div>
+                          ) : null}
+                        </div>
+                      </div>
+
+                      {/* Safeguarding */}
+                      {(intakeSummary.suicidalThoughtsRecently || intakeSummary.attemptedSuicide) ? (
+                        <div className="cg-sensitive-section mt-4 rounded-lg border border-amber-200 bg-amber-50/50 p-3">
+                          <p className="text-xs font-semibold uppercase tracking-wide text-amber-800">
+                            Safeguarding Responses
+                          </p>
+                          <div className="mt-2 grid gap-x-6 gap-y-2 text-sm lg:grid-cols-2">
+                            <div>
+                              <p className="text-[11px] text-amber-700">Recent suicidal thoughts</p>
+                              <p className="font-medium">{formatToken(intakeSummary.suicidalThoughtsRecently)}</p>
+                            </div>
+                            {intakeSummary.suicidalThoughtsDetails ? (
+                              <div>
+                                <p className="text-[11px] text-amber-700">Details</p>
+                                <p>{intakeSummary.suicidalThoughtsDetails}</p>
+                              </div>
+                            ) : null}
+                            <div>
+                              <p className="text-[11px] text-amber-700">Previous suicide attempt</p>
+                              <p className="font-medium">{formatToken(intakeSummary.attemptedSuicide)}</p>
+                            </div>
+                            {intakeSummary.attemptedSuicideDetails ? (
+                              <div>
+                                <p className="text-[11px] text-amber-700">Details</p>
+                                <p>{intakeSummary.attemptedSuicideDetails}</p>
+                              </div>
+                            ) : null}
+                          </div>
+                        </div>
+                      ) : null}
+
+                      {/* Availability & Consent */}
+                      <div className="mt-4 grid gap-3 text-sm lg:grid-cols-2">
+                        <div className="rounded-lg border border-[color:var(--border)] bg-[color:var(--accent-soft)]/20 p-3">
+                          <p className="text-xs font-semibold uppercase tracking-wide text-[color:var(--accent)]">
+                            Availability Preferences
+                          </p>
+                          <div className="mt-2 space-y-1.5">
+                            <div>
+                              <p className="text-[11px] text-[color:var(--muted)]">Location</p>
+                              <p>{formatToken(intakeSummary.location)}</p>
+                            </div>
+                            <div>
+                              <p className="text-[11px] text-[color:var(--muted)]">Online Accepted</p>
+                              <p>{intakeSummary.includeOnline === null ? "Not provided" : intakeSummary.includeOnline ? "Yes" : "No"}</p>
+                            </div>
+                            <div>
+                              <p className="text-[11px] text-[color:var(--muted)]">Time Preferences</p>
+                              <p>{intakeSummary.timePreferences.length > 0 ? intakeSummary.timePreferences.map((entry) => formatToken(entry)).join(", ") : "Not provided"}</p>
+                            </div>
+                            {intakeSummary.availabilityNotes ? (
+                              <div>
+                                <p className="text-[11px] text-[color:var(--muted)]">Notes</p>
+                                <p>{intakeSummary.availabilityNotes}</p>
+                              </div>
+                            ) : null}
+                          </div>
+                        </div>
+                        <div className="rounded-lg border border-[color:var(--border)] bg-[color:var(--accent-soft)]/20 p-3">
+                          <p className="text-xs font-semibold uppercase tracking-wide text-[color:var(--accent)]">
+                            Consent
+                          </p>
+                          <div className="mt-2 space-y-1.5">
+                            <div>
+                              <p className="text-[11px] text-[color:var(--muted)]">Signature Type</p>
+                              <p>{formatToken(intakeSummary.consent.signatureType)}</p>
+                            </div>
+                            <div>
+                              <p className="text-[11px] text-[color:var(--muted)]">Signed At</p>
+                              <p>{intakeSummary.consent.signedAt || "Not provided"}</p>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </details>
+                ) : null}
               </article>
             );
           })

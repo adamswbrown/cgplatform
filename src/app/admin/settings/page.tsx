@@ -12,6 +12,7 @@ export default async function AdminSettingsPage() {
       subtitle="Manage operational defaults and form content without code changes."
       userName={user.name}
       role={user.role}
+      currentPath="/admin/settings"
       navItems={[
         { href: "/admin/cases", label: "All Cases" },
         { href: "/admin/assignments", label: "Assignments" },

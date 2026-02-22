@@ -34,6 +34,7 @@ export default async function SessionBriefingPage({ params }: SessionBriefingPag
       subtitle="Detailed pre-session packet for counsellor execution."
       userName={user.name}
       role={user.role}
+      currentPath="/specialist/sessions"
       navItems={[
         { href: "/specialist/sessions", label: "My Sessions" },
         { href: "/specialist/clients", label: "My Clients" },

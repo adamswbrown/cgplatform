@@ -53,6 +53,7 @@ export default async function SpecialistProfilePage({
       subtitle="Operations profile view for assignment fit and scheduler mappings."
       userName={user.name}
       role={user.role}
+      currentPath="/admin/specialists"
       navItems={[
         { href: "/admin/cases", label: "All Cases" },
         { href: "/admin/assignments", label: "Assignments" },
@@ -64,12 +65,12 @@ export default async function SpecialistProfilePage({
       ]}
     >
       {error ? (
-        <p className="mb-4 rounded-md border border-[color:var(--danger)] bg-red-50 px-3 py-2 text-sm text-[color:var(--danger)]">
+        <p className="mb-4 cg-alert cg-alert-error">
           {error}
         </p>
       ) : null}
       {updated ? (
-        <p className="mb-4 rounded-md border border-emerald-300 bg-emerald-50 px-3 py-2 text-sm text-emerald-900">
+        <p className="mb-4 cg-alert cg-alert-success">
           Counsellor profile updated.
         </p>
       ) : null}

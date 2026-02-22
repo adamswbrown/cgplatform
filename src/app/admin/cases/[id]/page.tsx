@@ -21,7 +21,7 @@ import {
   listSpecialistsForOps,
   listWorkflowTemplatesForOps,
 } from "@/lib/case-service";
-import { formatDateTime, formatStatus } from "@/lib/format";
+import { formatDateTime, formatStatus, statusColorKey } from "@/lib/format";
 import { CASE_TRANSITIONS } from "@/lib/workflow";
 
 type CaseDetailPageProps = {
@@ -86,8 +86,8 @@ function normalizeCasePanel(value: string | undefined): CasePanel {
 
 function tabClassName(active: boolean) {
   return active
-    ? "inline-flex items-center justify-center rounded-xl border border-[color:var(--cg-ink)] bg-[color:var(--cg-light-accent)] px-4 py-2 text-xs font-semibold uppercase tracking-wide text-[color:var(--cg-ink)] shadow-[0_1px_0_rgba(5,46,30,0.06)]"
-    : "inline-flex items-center justify-center rounded-xl border border-[color:var(--border)] bg-white px-4 py-2 text-xs font-semibold uppercase tracking-wide text-[color:var(--muted)] hover:bg-[color:var(--accent-soft)]";
+    ? "cg-tab cg-tab-active"
+    : "cg-tab";
 }
 
 function readStringMetadata(
@@ -784,8 +784,25 @@ export default async function CaseDetailPage({ params, searchParams }: CaseDetai
   const intakeContactRows = intakeGroupMap?.contact || [];
   const intakeConsentRows = intakeGroupMap?.consent || [];
   const intakeAdditionalRows = intakeGroupMap?.additional || [];
-  const intakeResponseRows = [...intakeParticipantRows, ...intakeAdditionalRows];
-  const intakeSupportingRows = [...intakeContactRows, ...intakeConsentRows];
+
+  // Split participants into primary / secondary for structured display
+  const intakePrimaryRows = intakeParticipantRows.filter((r) => r.path.startsWith("primary."));
+  const intakeSecondaryRows = intakeParticipantRows.filter((r) => r.path.startsWith("secondary."));
+
+  // Split contact group into emergency / GP / contact preferences
+  const intakeEmergencyRows = intakeContactRows.filter((r) => r.path.includes("emergency"));
+  const intakeGpRows = intakeContactRows.filter((r) => r.path.includes("gp") || r.path.includes("Gp"));
+  const intakeContactPrefRows = intakeContactRows.filter(
+    (r) => r.path.includes("contactPreferences"),
+  );
+
+  // Split presenting into safeguarding vs non-safeguarding
+  const intakeSafeguardingRows = intakePresentingRows.filter(
+    (r) => r.path.includes("suicidal") || r.path.includes("attemptedSuicide"),
+  );
+  const intakePresentingNonSafeguardingRows = intakePresentingRows.filter(
+    (r) => !r.path.includes("suicidal") && !r.path.includes("attemptedSuicide"),
+  );
   const intakePayloadJson =
     activePanel === "intake" && caseItem.intakeFormData
       ? JSON.stringify(caseItem.intakeFormData, null, 2)
@@ -797,6 +814,7 @@ export default async function CaseDetailPage({ params, searchParams }: CaseDetai
       subtitle="Manage lifecycle state, required documents, provider booking references, and audit logs."
       userName={user.name}
       role={user.role}
+      currentPath="/admin/cases"
       navItems={[
         { href: "/admin/cases", label: "All Cases" },
         { href: "/admin/assignments", label: "Assignments" },
@@ -808,12 +826,10 @@ export default async function CaseDetailPage({ params, searchParams }: CaseDetai
       ]}
     >
       {error ? (
-        <p className="mb-4 rounded-md border border-[color:var(--danger)] bg-red-50 px-3 py-2 text-sm text-[color:var(--danger)]">
-          {error}
-        </p>
+        <p className="cg-alert cg-alert-error mb-4">{error}</p>
       ) : null}
       {pinIssued ? (
-        <div className="mb-4 rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-800">
+        <div className="cg-alert cg-alert-success mb-4">
           <p>
             PIN issued for <strong>{pinRecipient}</strong> ({pinFormType}).
           </p>
@@ -838,7 +854,7 @@ export default async function CaseDetailPage({ params, searchParams }: CaseDetai
         </div>
       ) : null}
       {pinRevoked ? (
-        <div className="mb-4 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+        <div className="cg-alert cg-alert-warning mb-4">
           <p>
             {pinRevokedAlready ? "PIN was already disabled" : "PIN disabled"} for{" "}
             <strong>{pinRevokedRecipient || "participant"}</strong>
@@ -852,7 +868,11 @@ export default async function CaseDetailPage({ params, searchParams }: CaseDetai
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
             <p className="text-sm text-[color:var(--muted)]">Current status</p>
-            <h2 data-testid="case-current-status" className="text-xl font-semibold">
+            <h2 data-testid="case-current-status" className="mt-1 flex items-center gap-2 text-xl font-semibold">
+              <span
+                className="cg-status-dot"
+                style={{ background: `var(--cg-status-${statusColorKey(caseItem.status)})` }}
+              />
               {formatStatus(caseItem.status)}
             </h2>
           </div>
@@ -924,9 +944,9 @@ export default async function CaseDetailPage({ params, searchParams }: CaseDetai
         </div>
       </section>
 
-      <section className="mt-4 rounded-2xl border border-[color:var(--border)] bg-[color:var(--surface)] p-3 shadow-sm">
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <nav className="flex flex-wrap gap-2">
+      <section className="mt-4 rounded-2xl border border-[color:var(--border)] bg-[color:var(--surface)] shadow-sm">
+        <div className="flex items-center justify-between px-4 pt-1">
+          <nav className="cg-tab-bar flex-1">
             {CASE_PANELS.map((panel) => (
               <Link key={panel.id} href={panelHref(panel.id)} className={tabClassName(panel.id === activePanel)}>
                 {panel.label}
@@ -935,7 +955,7 @@ export default async function CaseDetailPage({ params, searchParams }: CaseDetai
           </nav>
           <Link
             href="/admin/cases"
-            className="rounded-md border border-[color:var(--border)] px-3 py-1.5 text-xs font-semibold uppercase tracking-wide"
+            className="ml-3 flex-shrink-0 rounded-md border border-[color:var(--border)] px-3 py-1.5 text-xs font-semibold uppercase tracking-wide hover:bg-[color:var(--accent-soft)]"
           >
             Back to case list
           </Link>
@@ -1252,7 +1272,7 @@ export default async function CaseDetailPage({ params, searchParams }: CaseDetai
           </div>
 
           {intakeNotesSaved ? (
-            <p className="mt-3 rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-800">
+            <p className="cg-alert cg-alert-success mt-3">
               Intake review notes saved.
             </p>
           ) : null}
@@ -1289,122 +1309,201 @@ export default async function CaseDetailPage({ params, searchParams }: CaseDetai
           </div>
 
           <div className="mt-4 grid gap-4 xl:grid-cols-12">
-            <article className="rounded-xl border border-[color:var(--border)] bg-white p-4 xl:col-span-4">
-              <p className="text-xs font-semibold uppercase tracking-wide text-[color:var(--muted)]">
-                Client at a glance
-              </p>
-              <div className="mt-3 flex items-center gap-3">
-                <div className="flex h-12 w-12 items-center justify-center rounded-full bg-[color:var(--accent-soft)] text-sm font-semibold text-[color:var(--cg-ink)]">
-                  {intakeProfileSnapshot?.initials || "N/A"}
+            <div className="xl:col-span-8">
+              <div className="rounded-lg border border-[color:var(--border)] bg-white px-4 py-4">
+                <div className="grid gap-4 lg:grid-cols-2">
+                  {/* Primary Participant */}
+                  <div className="space-y-3">
+                    <div>
+                      <p className="text-xs font-semibold uppercase tracking-wide text-[color:var(--accent)]">
+                        Primary Participant
+                      </p>
+                      <div className="mt-2 grid grid-cols-2 gap-x-4 gap-y-1.5 text-sm">
+                        {intakePrimaryRows.length > 0 ? (
+                          intakePrimaryRows.map((row, index) => (
+                            <div key={`primary-row:${row.path}:${index}`}>
+                              <p className="text-[11px] text-[color:var(--muted)]">{row.label}</p>
+                              <p>{row.response}</p>
+                            </div>
+                          ))
+                        ) : (
+                          <p className="col-span-2 text-[color:var(--muted)]">No participant data.</p>
+                        )}
+                      </div>
+                    </div>
+
+                    {intakeContactPrefRows.length > 0 ? (
+                      <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 text-sm">
+                        {intakeContactPrefRows.map((row, index) => (
+                          <div key={`contact-pref-row:${row.path}:${index}`}>
+                            <p className="text-[11px] text-[color:var(--muted)]">{row.label}</p>
+                            <p>{row.response}</p>
+                          </div>
+                        ))}
+                      </div>
+                    ) : null}
+
+                    {intakeSnapshotRows.length > 0 ? (
+                      <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 text-sm">
+                        {intakeSnapshotRows.map((row, index) => (
+                          <div key={`snapshot-row:${row.path}:${index}`}>
+                            <p className="text-[11px] text-[color:var(--muted)]">{row.label}</p>
+                            <p>{row.response}</p>
+                          </div>
+                        ))}
+                      </div>
+                    ) : null}
+                  </div>
+
+                  {/* Emergency Contact & GP */}
+                  <div className="space-y-3">
+                    <div>
+                      <p className="text-xs font-semibold uppercase tracking-wide text-[color:var(--accent)]">
+                        Emergency Contact
+                      </p>
+                      <div className="mt-2 grid grid-cols-2 gap-x-4 gap-y-1.5 text-sm">
+                        {intakeEmergencyRows.length > 0 ? (
+                          intakeEmergencyRows.map((row, index) => (
+                            <div key={`emergency-row:${row.path}:${index}`}>
+                              <p className="text-[11px] text-[color:var(--muted)]">{row.label}</p>
+                              <p>{row.response}</p>
+                            </div>
+                          ))
+                        ) : (
+                          <p className="col-span-2 text-[color:var(--muted)]">Not provided</p>
+                        )}
+                      </div>
+                    </div>
+
+                    <div>
+                      <p className="text-xs font-semibold uppercase tracking-wide text-[color:var(--accent)]">
+                        GP / Doctor
+                      </p>
+                      <div className="mt-2 grid grid-cols-2 gap-x-4 gap-y-1.5 text-sm">
+                        {intakeGpRows.length > 0 ? (
+                          intakeGpRows.map((row, index) => (
+                            <div key={`gp-row:${row.path}:${index}`}>
+                              <p className="text-[11px] text-[color:var(--muted)]">{row.label}</p>
+                              <p>{row.response}</p>
+                            </div>
+                          ))
+                        ) : (
+                          <p className="col-span-2 text-[color:var(--muted)]">Not provided</p>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Secondary Participant (couples) */}
+                    {intakeSecondaryRows.length > 0 ? (
+                      <div>
+                        <p className="text-xs font-semibold uppercase tracking-wide text-[color:var(--accent)]">
+                          Secondary Participant
+                        </p>
+                        <div className="mt-2 grid grid-cols-2 gap-x-4 gap-y-1.5 text-sm">
+                          {intakeSecondaryRows.map((row, index) => (
+                            <div key={`secondary-row:${row.path}:${index}`}>
+                              <p className="text-[11px] text-[color:var(--muted)]">{row.label}</p>
+                              <p>{row.response}</p>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    ) : null}
+                  </div>
                 </div>
-                <div>
-                  <p className="text-base font-semibold text-[color:var(--cg-ink)]">
-                    {intakeProfileSnapshot?.displayName || "No intake participants"}
-                  </p>
-                  <p className="text-sm text-[color:var(--muted)]">
-                    Main issue: {intakeProfileSnapshot?.mainIssue || "Not provided"}
-                  </p>
+
+                {/* Presenting Issues */}
+                {intakePresentingNonSafeguardingRows.length > 0 ? (
+                  <div className="mt-4 rounded-lg border border-[color:var(--border)] bg-[color:var(--accent-soft)]/20 p-3">
+                    <p className="text-xs font-semibold uppercase tracking-wide text-[color:var(--accent)]">
+                      Presenting Issues
+                    </p>
+                    <div className="mt-2 grid gap-x-6 gap-y-2 text-sm lg:grid-cols-2">
+                      {intakePresentingNonSafeguardingRows.map((row, index) => (
+                        <div key={`presenting-row:${row.path}:${index}`}>
+                          <p className="text-[11px] text-[color:var(--muted)]">{row.label}</p>
+                          <p>{row.response}</p>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ) : null}
+
+                {/* Safeguarding Responses */}
+                {intakeSafeguardingRows.length > 0 ? (
+                  <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50/50 p-3">
+                    <p className="text-xs font-semibold uppercase tracking-wide text-amber-800">
+                      Safeguarding Responses
+                    </p>
+                    <div className="mt-2 grid gap-x-6 gap-y-2 text-sm lg:grid-cols-2">
+                      {intakeSafeguardingRows.map((row, index) => (
+                        <div key={`safeguarding-row:${row.path}:${index}`}>
+                          <p className="text-[11px] text-amber-700">{row.label}</p>
+                          <p className="font-medium">{row.response}</p>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ) : null}
+
+                {/* Availability Preferences & Consent */}
+                <div className="mt-4 grid gap-3 text-sm lg:grid-cols-2">
+                  {intakeAvailabilityRows.length > 0 ? (
+                    <div className="rounded-lg border border-[color:var(--border)] bg-[color:var(--accent-soft)]/20 p-3">
+                      <p className="text-xs font-semibold uppercase tracking-wide text-[color:var(--accent)]">
+                        Availability Preferences
+                      </p>
+                      <div className="mt-2 space-y-1.5">
+                        {intakeAvailabilityRows.map((row, index) => (
+                          <div key={`availability-row:${row.path}:${index}`}>
+                            <p className="text-[11px] text-[color:var(--muted)]">{row.label}</p>
+                            <p>{row.response}</p>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ) : null}
+
+                  {intakeConsentRows.length > 0 ? (
+                    <div className="rounded-lg border border-[color:var(--border)] bg-[color:var(--accent-soft)]/20 p-3">
+                      <p className="text-xs font-semibold uppercase tracking-wide text-[color:var(--accent)]">
+                        Consent
+                      </p>
+                      <div className="mt-2 space-y-1.5">
+                        {intakeConsentRows.map((row, index) => (
+                          <div key={`consent-row:${row.path}:${index}`}>
+                            <p className="text-[11px] text-[color:var(--muted)]">{row.label}</p>
+                            <p>{row.response}</p>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ) : null}
                 </div>
-              </div>
-              <div className="mt-3 grid gap-2">
-                {intakeSnapshotRows.length > 0 ? (
-                  intakeSnapshotRows.slice(0, 4).map((row, index) => (
-                    <article
-                      key={`snapshot-row:${row.path}:${index}`}
-                      className="rounded-lg border border-[color:var(--border)] bg-[color:var(--accent-soft)]/35 px-3 py-2"
-                    >
-                      <p className="text-[11px] font-semibold uppercase tracking-wide text-[color:var(--muted)]">
-                        {row.label}
-                      </p>
-                      <p className="mt-0.5 text-sm">{row.response}</p>
-                    </article>
-                  ))
-                ) : (
-                  <p className="text-sm text-[color:var(--muted)]">No summary responses.</p>
-                )}
-              </div>
-            </article>
 
-            <article className="rounded-xl border border-[color:var(--border)] bg-white p-4 xl:col-span-4">
-              <p className="text-xs font-semibold uppercase tracking-wide text-[color:var(--muted)]">
-                Presenting concerns
-              </p>
-              <div className="mt-3 grid gap-2">
-                {intakePresentingRows.length > 0 ? (
-                  intakePresentingRows.map((row, index) => (
-                    <article
-                      key={`presenting-row:${row.path}:${index}`}
-                      className="rounded-lg border border-[color:var(--border)] bg-[color:var(--accent-soft)]/35 px-3 py-2"
-                    >
-                      <p className="text-[11px] font-semibold uppercase tracking-wide text-[color:var(--muted)]">
-                        {row.label}
-                      </p>
-                      <p className="mt-0.5 text-sm">{row.response}</p>
-                    </article>
-                  ))
-                ) : (
-                  <p className="text-sm text-[color:var(--muted)]">No presenting concern responses.</p>
-                )}
+                {/* Additional responses (if any) */}
+                {intakeAdditionalRows.length > 0 ? (
+                  <div className="mt-4 grid grid-cols-2 gap-x-4 gap-y-1.5 text-sm">
+                    {intakeAdditionalRows.map((row, index) => (
+                      <div key={`additional-row:${row.path}:${index}`}>
+                        <p className="text-[11px] text-[color:var(--muted)]">{row.label}</p>
+                        <p>{row.response}</p>
+                      </div>
+                    ))}
+                  </div>
+                ) : null}
               </div>
-            </article>
-
-            <article className="rounded-xl border border-[color:var(--border)] bg-white p-4 xl:col-span-4">
-              <p className="text-xs font-semibold uppercase tracking-wide text-[color:var(--muted)]">
-                Availability
-              </p>
-              <div className="mt-3 grid gap-2">
-                {intakeAvailabilityRows.length > 0 ? (
-                  intakeAvailabilityRows.map((row, index) => (
-                    <article
-                      key={`availability-row:${row.path}:${index}`}
-                      className="rounded-lg border border-[color:var(--border)] bg-[color:var(--accent-soft)]/35 px-3 py-2"
-                    >
-                      <p className="text-[11px] font-semibold uppercase tracking-wide text-[color:var(--muted)]">
-                        {row.label}
-                      </p>
-                      <p className="mt-0.5 text-sm">{row.response}</p>
-                    </article>
-                  ))
-                ) : (
-                  <p className="text-sm text-[color:var(--muted)]">No availability responses.</p>
-                )}
-              </div>
-            </article>
-          </div>
-
-          <div className="mt-4 grid gap-4 xl:grid-cols-12">
-            <article className="rounded-xl border border-[color:var(--border)] bg-white p-4 xl:col-span-8">
-              <p className="text-xs font-semibold uppercase tracking-wide text-[color:var(--muted)]">
-                Profile information & intake responses
-              </p>
-              <div className="mt-3 grid gap-2 md:grid-cols-2">
-                {intakeResponseRows.length > 0 ? (
-                  intakeResponseRows.map((row, index) => (
-                    <article
-                      key={`response-row:${row.path}:${index}`}
-                      className="rounded-lg border border-[color:var(--border)] bg-[color:var(--accent-soft)]/30 px-3 py-2"
-                    >
-                      <p className="text-[11px] font-semibold uppercase tracking-wide text-[color:var(--muted)]">
-                        {row.label}
-                      </p>
-                      <p className="mt-0.5 text-sm">{row.response}</p>
-                    </article>
-                  ))
-                ) : (
-                  <p className="text-sm text-[color:var(--muted)]">No participant intake responses.</p>
-                )}
-              </div>
-            </article>
+            </div>
 
             <form
               action={updateCaseIntakeReviewNotesAction}
-              className="rounded-xl border border-[color:var(--border)] bg-white p-4 xl:col-span-4"
+              className="self-start rounded-lg border border-[color:var(--border)] bg-white p-4 xl:col-span-4"
             >
               <input type="hidden" name="caseId" value={caseItem.id} />
               <input type="hidden" name="redirectTo" value={panelHref("intake")} />
               <label
                 htmlFor="intakeReviewNotes"
-                className="block text-xs font-semibold uppercase tracking-wide text-[color:var(--muted)]"
+                className="block text-xs font-semibold uppercase tracking-wide text-[color:var(--accent)]"
               >
                 Intake Review Notes (Ops)
               </label>
@@ -1427,27 +1526,6 @@ export default async function CaseDetailPage({ params, searchParams }: CaseDetai
               </button>
             </form>
           </div>
-
-          {intakeSupportingRows.length > 0 ? (
-            <article className="mt-4 rounded-xl border border-[color:var(--border)] bg-white p-4">
-              <p className="text-xs font-semibold uppercase tracking-wide text-[color:var(--muted)]">
-                Emergency, GP & consent
-              </p>
-              <div className="mt-3 grid gap-2 md:grid-cols-2">
-                {intakeSupportingRows.map((row, index) => (
-                  <article
-                    key={`supporting-row:${row.path}:${index}`}
-                    className="rounded-lg border border-[color:var(--border)] bg-[color:var(--accent-soft)]/30 px-3 py-2"
-                  >
-                    <p className="text-[11px] font-semibold uppercase tracking-wide text-[color:var(--muted)]">
-                      {row.label}
-                    </p>
-                    <p className="mt-0.5 text-sm">{row.response}</p>
-                  </article>
-                ))}
-              </div>
-            </article>
-          ) : null}
 
           {intakePayloadJson ? (
             <details className="mt-3 rounded-lg border border-[color:var(--border)] p-3">

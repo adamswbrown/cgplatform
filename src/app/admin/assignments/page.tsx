@@ -23,6 +23,7 @@ export default async function ManualAssignmentsPage({
       subtitle={`Use Kanban or Calendar Grid mode to assign, reassign, and unassign cases against ${dashboard.slotPolicy.slotMinutes}-minute slots from ${String(dashboard.slotPolicy.startHour).padStart(2, "0")}:00 to ${String(dashboard.slotPolicy.endHour).padStart(2, "0")}:00.`}
       userName={user.name}
       role={user.role}
+      currentPath="/admin/assignments"
       navItems={[
         { href: "/admin/cases", label: "All Cases" },
         { href: "/admin/assignments", label: "Assignments" },
@@ -34,13 +35,13 @@ export default async function ManualAssignmentsPage({
       ]}
     >
       {error ? (
-        <p className="rounded-2xl border border-[color:var(--danger)] bg-red-50 px-3 py-2 text-sm text-[color:var(--danger)]">
+        <p className="cg-alert cg-alert-error">
           {error}
         </p>
       ) : null}
 
       {dashboard.schedulingEngineType !== "manual" ? (
-        <section className="rounded-2xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+        <section className="cg-alert cg-alert-warning">
           <p>
             Scheduling engine is currently <strong>{dashboard.schedulingEngineType}</strong>. The
             assignment board is optimized for the manual engine.
@@ -56,7 +57,7 @@ export default async function ManualAssignmentsPage({
       ) : null}
 
       {dashboard.assignmentMode !== "manual" ? (
-        <section className="rounded-2xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+        <section className="cg-alert cg-alert-warning">
           <p>
             Scheduling assignment mode is <strong>{dashboard.assignmentMode}</strong>. For this board
             workflow, switch mode to <strong>manual</strong> in Operational Settings.
@@ -65,7 +66,7 @@ export default async function ManualAssignmentsPage({
       ) : null}
 
       {dashboard.providerError ? (
-        <section className="rounded-2xl border border-[color:var(--danger)] bg-red-50 px-4 py-3 text-sm text-[color:var(--danger)]">
+        <section className="cg-alert cg-alert-error">
           <p>{dashboard.providerError}</p>
         </section>
       ) : null}

@@ -43,7 +43,7 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
               </p>
 
               {error ? (
-                <p className="mt-4 rounded-2xl border border-[color:var(--danger)] bg-red-50 px-3 py-2 text-sm text-[color:var(--danger)]">
+                <p className="mt-4 cg-alert cg-alert-error">
                   {error}
                 </p>
               ) : null}

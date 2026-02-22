@@ -663,10 +663,10 @@ export function SpecialistAvailabilityCalendar({
 
       {notice ? (
         <p
-          className={`mb-3 rounded-lg border px-3 py-2 text-sm ${
+          className={`mb-3 ${
             notice.type === "success"
-              ? "border-emerald-300 bg-emerald-50 text-emerald-900"
-              : "border-[color:var(--danger)] bg-red-50 text-[color:var(--danger)]"
+              ? "cg-alert cg-alert-success"
+              : "cg-alert cg-alert-error"
           }`}
         >
           {notice.message}

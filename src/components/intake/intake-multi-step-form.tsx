@@ -152,9 +152,16 @@ function SignatureCapture({
     setDrawnSignature("");
   };
 
+  const hasSignature = signatureType === "typed" ? typedSignature.trim().length > 0 : drawnSignature.length > 0;
+
   return (
     <div className="space-y-3 rounded-2xl border border-[color:var(--border)] p-4">
-      <p className="text-sm font-medium">I consent *</p>
+      <div>
+        <p className="text-sm font-medium">Consent & Signature *</p>
+        <p className="mt-1 text-xs leading-relaxed text-[color:var(--muted)]">
+          By providing your signature, you confirm that the information you provide is accurate and that you consent to us using it to arrange your counselling.
+        </p>
+      </div>
       <div className="flex flex-wrap gap-4 text-sm">
         <label className="flex items-center gap-2">
           <input
@@ -193,20 +200,31 @@ function SignatureCapture({
             onPointerMove={draw}
             onPointerUp={endDraw}
             onPointerLeave={endDraw}
-            className="w-full rounded-xl border border-[color:var(--border)] bg-white"
+            className="cg-signature-canvas w-full"
           />
-          <button
-            type="button"
-            onClick={clearDrawnSignature}
-            className="cg-cta-secondary mt-2 px-3 py-1.5 text-xs"
-          >
-            Clear Signature
-          </button>
+          <div className="mt-2 flex items-center justify-between">
+            <button
+              type="button"
+              onClick={clearDrawnSignature}
+              className="cg-cta-secondary px-3 py-1.5 text-xs"
+            >
+              Clear Signature
+            </button>
+            {drawnSignature ? (
+              <span className="inline-flex items-center gap-1.5 text-xs font-medium text-[color:var(--cg-dark-accent)]">
+                <svg aria-hidden="true" viewBox="0 0 16 16" fill="currentColor" className="h-3.5 w-3.5"><path fillRule="evenodd" d="M12.416 3.376a.75.75 0 0 1 .208 1.04l-5 7.5a.75.75 0 0 1-1.154.114l-3-3a.75.75 0 0 1 1.06-1.06l2.353 2.353 4.493-6.74a.75.75 0 0 1 1.04-.207Z" clipRule="evenodd" /></svg>
+                Signature captured
+              </span>
+            ) : null}
+          </div>
         </div>
       )}
 
-      {signatureType === "drawn" && drawnSignature ? (
-        <p className="text-xs text-[color:var(--muted)]">Drawn signature captured.</p>
+      {signatureType === "typed" && hasSignature ? (
+        <span className="inline-flex items-center gap-1.5 text-xs font-medium text-[color:var(--cg-dark-accent)]">
+          <svg aria-hidden="true" viewBox="0 0 16 16" fill="currentColor" className="h-3.5 w-3.5"><path fillRule="evenodd" d="M12.416 3.376a.75.75 0 0 1 .208 1.04l-5 7.5a.75.75 0 0 1-1.154.114l-3-3a.75.75 0 0 1 1.06-1.06l2.353 2.353 4.493-6.74a.75.75 0 0 1 1.04-.207Z" clipRule="evenodd" /></svg>
+          Signature recorded
+        </span>
       ) : null}
     </div>
   );
@@ -564,17 +582,46 @@ export function IntakeMultiStepForm({
     }
   };
 
+  const errorRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (submitError && errorRef.current) {
+      errorRef.current.scrollIntoView({ behavior: "smooth", block: "center" });
+    }
+  }, [submitError]);
+
   return (
     <div className="space-y-5">
-      <div className="rounded-2xl border border-[color:var(--border)] bg-[color:var(--accent-soft)]/30 p-3">
-        <p className="cg-nav-label text-[color:var(--muted)]">Step {step + 1} of {STEP_TITLES.length}</p>
-        <h3 className="mt-2 text-lg">{STEP_TITLES[step]}</h3>
+      <div className="rounded-2xl border border-[color:var(--border)] bg-[color:var(--surface)] p-4">
+        <div className="cg-progress-bar">
+          {STEP_TITLES.map((title, index) => {
+            const isCompleted = index < step;
+            const isActive = index === step;
+            const stepClass = isCompleted
+              ? "cg-progress-step cg-progress-step-completed"
+              : isActive
+                ? "cg-progress-step cg-progress-step-active"
+                : "cg-progress-step";
+            return (
+              <div key={title} className={stepClass}>
+                <div className="cg-progress-indicator">
+                  {isCompleted ? (
+                    <svg aria-hidden="true" viewBox="0 0 16 16" fill="currentColor" className="h-3 w-3"><path fillRule="evenodd" d="M12.416 3.376a.75.75 0 0 1 .208 1.04l-5 7.5a.75.75 0 0 1-1.154.114l-3-3a.75.75 0 0 1 1.06-1.06l2.353 2.353 4.493-6.74a.75.75 0 0 1 1.04-.207Z" clipRule="evenodd" /></svg>
+                  ) : (
+                    index + 1
+                  )}
+                </div>
+                <span className="cg-progress-label">{title}</span>
+              </div>
+            );
+          })}
+        </div>
       </div>
 
       {submitError ? (
-        <p className="rounded-2xl border border-[color:var(--danger)] bg-red-50 px-3 py-2 text-sm text-[color:var(--danger)]">
+        <div ref={errorRef} className="cg-alert cg-alert-error">
           {submitError}
-        </p>
+        </div>
       ) : null}
 
       {step === 0 ? (
@@ -953,68 +1000,84 @@ export function IntakeMultiStepForm({
             ) : null}
           </div>
 
-          <div>
-            <p className="text-sm font-medium">Have you had any suicidal thoughts recently? *</p>
-            <div className="mt-2 flex gap-6 text-sm">
-              <label className="flex items-center gap-2">
-                <input
-                  type="radio"
-                  checked={suicidalThoughtsRecently === "yes"}
-                  onChange={() => setSuicidalThoughtsRecently("yes")}
-                />
-                Yes
-              </label>
-              <label className="flex items-center gap-2">
-                <input
-                  type="radio"
-                  checked={suicidalThoughtsRecently === "no"}
-                  onChange={() => setSuicidalThoughtsRecently("no")}
-                />
-                No
-              </label>
+          <div className="cg-sensitive-section space-y-5">
+            <div>
+              <p className="text-sm font-semibold text-[color:var(--cg-ink)]">Safeguarding Questions</p>
+              <p className="mt-1 text-sm leading-relaxed text-[color:var(--muted)]">
+                These questions help us provide you with the most appropriate support. Your answers are
+                treated with complete confidentiality.
+              </p>
             </div>
-            {suicidalThoughtsRecently === "yes" ? (
-              <textarea
-                rows={5}
-                maxLength={1000}
-                value={suicidalThoughtsDetails}
-                onChange={(event) => setSuicidalThoughtsDetails(event.target.value)}
-                placeholder="If you have had suicidal thoughts recently, please provide more detail here."
-                className="mt-2 w-full px-3 py-2"
-              />
-            ) : null}
-          </div>
 
-          <div>
-            <p className="text-sm font-medium">Have you ever attempted suicide? *</p>
-            <div className="mt-2 flex gap-6 text-sm">
-              <label className="flex items-center gap-2">
-                <input
-                  type="radio"
-                  checked={attemptedSuicide === "yes"}
-                  onChange={() => setAttemptedSuicide("yes")}
-                />
-                Yes
-              </label>
-              <label className="flex items-center gap-2">
-                <input
-                  type="radio"
-                  checked={attemptedSuicide === "no"}
-                  onChange={() => setAttemptedSuicide("no")}
-                />
-                No
-              </label>
+            <div>
+              <p className="text-sm font-medium">Have you had any suicidal thoughts recently? *</p>
+              <div className="mt-2 flex gap-6 text-sm">
+                <label className="flex items-center gap-2">
+                  <input
+                    type="radio"
+                    checked={suicidalThoughtsRecently === "yes"}
+                    onChange={() => setSuicidalThoughtsRecently("yes")}
+                  />
+                  Yes
+                </label>
+                <label className="flex items-center gap-2">
+                  <input
+                    type="radio"
+                    checked={suicidalThoughtsRecently === "no"}
+                    onChange={() => setSuicidalThoughtsRecently("no")}
+                  />
+                  No
+                </label>
+              </div>
+              {suicidalThoughtsRecently === "yes" ? (
+                <>
+                  <textarea
+                    rows={5}
+                    maxLength={1000}
+                    value={suicidalThoughtsDetails}
+                    onChange={(event) => setSuicidalThoughtsDetails(event.target.value)}
+                    placeholder="If you have had suicidal thoughts recently, please provide more detail here."
+                    className="mt-2 w-full px-3 py-2"
+                  />
+                  <div className="cg-alert cg-alert-info mt-2">
+                    <p className="text-xs font-medium">If you are in crisis right now, please contact:</p>
+                    <p className="mt-1 text-xs">Samaritans: <strong>116 123</strong> (24hr) | Lifeline NI: <strong>0808 808 8000</strong></p>
+                  </div>
+                </>
+              ) : null}
             </div>
-            {attemptedSuicide === "yes" ? (
-              <textarea
-                rows={5}
-                maxLength={1000}
-                value={attemptedSuicideDetails}
-                onChange={(event) => setAttemptedSuicideDetails(event.target.value)}
-                placeholder="If you have attempted suicide, please provide more detail here."
-                className="mt-2 w-full px-3 py-2"
-              />
-            ) : null}
+
+            <div>
+              <p className="text-sm font-medium">Have you ever attempted suicide? *</p>
+              <div className="mt-2 flex gap-6 text-sm">
+                <label className="flex items-center gap-2">
+                  <input
+                    type="radio"
+                    checked={attemptedSuicide === "yes"}
+                    onChange={() => setAttemptedSuicide("yes")}
+                  />
+                  Yes
+                </label>
+                <label className="flex items-center gap-2">
+                  <input
+                    type="radio"
+                    checked={attemptedSuicide === "no"}
+                    onChange={() => setAttemptedSuicide("no")}
+                  />
+                  No
+                </label>
+              </div>
+              {attemptedSuicide === "yes" ? (
+                <textarea
+                  rows={5}
+                  maxLength={1000}
+                  value={attemptedSuicideDetails}
+                  onChange={(event) => setAttemptedSuicideDetails(event.target.value)}
+                  placeholder="If you have attempted suicide, please provide more detail here."
+                  className="mt-2 w-full px-3 py-2"
+                />
+              ) : null}
+            </div>
           </div>
         </section>
       ) : null}
@@ -1095,7 +1158,7 @@ export function IntakeMultiStepForm({
               </p>
               {availabilityLoading ? <p className="mt-3 text-sm">Loading availability...</p> : null}
               {availabilityError ? (
-                <p className="mt-3 rounded-xl border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+                <p className="mt-3 cg-alert cg-alert-warning">
                   {availabilityError}
                 </p>
               ) : null}

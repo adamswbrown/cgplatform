@@ -35,6 +35,7 @@ export default async function SpecialistManagementPage({
       subtitle="Create counsellors and configure external scheduler mappings."
       userName={user.name}
       role={user.role}
+      currentPath="/admin/specialists"
       navItems={[
         { href: "/admin/cases", label: "All Cases" },
         { href: "/admin/assignments", label: "Assignments" },
@@ -46,7 +47,7 @@ export default async function SpecialistManagementPage({
       ]}
     >
       {error ? (
-        <p className="mb-4 rounded-md border border-[color:var(--danger)] bg-red-50 px-3 py-2 text-sm text-[color:var(--danger)]">
+        <p className="mb-4 cg-alert cg-alert-error">
           {error}
         </p>
       ) : null}
@@ -231,6 +232,19 @@ export default async function SpecialistManagementPage({
               </tr>
             </thead>
             <tbody className="divide-y divide-[color:var(--border)]">
+              {specialists.length === 0 ? (
+                <tr>
+                  <td colSpan={9}>
+                    <div className="cg-empty-state py-12">
+                      <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="cg-empty-state-icon">
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M4.26 10.147a60.438 60.438 0 0 0-.491 6.347A48.62 48.62 0 0 1 12 20.904a48.62 48.62 0 0 1 8.232-4.41 60.46 60.46 0 0 0-.491-6.347m-15.482 0a23.838 23.838 0 0 0-2.688 3.291c5.852.952 10.523 3.655 12.469 5.155a48.559 48.559 0 0 1 12.469-5.155 23.837 23.837 0 0 0-2.688-3.291m-15.482 0A23.94 23.94 0 0 1 12 3.89a23.94 23.94 0 0 1 7.74 6.257M12 12.75a.75.75 0 1 1 0-1.5.75.75 0 0 1 0 1.5Z" />
+                      </svg>
+                      <p className="text-sm font-medium">No counsellors created yet</p>
+                      <p className="mt-1 text-xs">Use the form above to create your first counsellor.</p>
+                    </div>
+                  </td>
+                </tr>
+              ) : null}
               {specialists.map((specialist) => {
                 const nextSession = specialist.sessions[0];
 

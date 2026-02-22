@@ -32,6 +32,7 @@ export default async function SpecialistAvailabilityOpsPage({
       subtitle="Ops calendar control for manual scheduling availability."
       userName={user.name}
       role={user.role}
+      currentPath="/admin/specialists"
       navItems={[
         { href: "/admin/cases", label: "All Cases" },
         { href: "/admin/assignments", label: "Assignments" },

@@ -23,6 +23,7 @@ export default async function IntakeSettingsPage({ searchParams }: IntakeSetting
       subtitle="Edit crisis modal/help text and availability notes shown in the public form."
       userName={user.name}
       role={user.role}
+      currentPath="/admin/settings"
       navItems={[
         { href: "/admin/cases", label: "All Cases" },
         { href: "/admin/assignments", label: "Assignments" },
@@ -34,12 +35,12 @@ export default async function IntakeSettingsPage({ searchParams }: IntakeSetting
       ]}
     >
       {error ? (
-        <p className="rounded-2xl border border-[color:var(--danger)] bg-red-50 px-3 py-2 text-sm text-[color:var(--danger)]">
+        <p className="cg-alert cg-alert-error">
           {error}
         </p>
       ) : null}
       {saved ? (
-        <p className="rounded-2xl border border-emerald-300 bg-emerald-50 px-3 py-2 text-sm text-emerald-900">
+        <p className="cg-alert cg-alert-success">
           Intake form content updated.
         </p>
       ) : null}

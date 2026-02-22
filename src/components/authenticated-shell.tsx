@@ -19,6 +19,7 @@ type AuthenticatedShellProps = {
   userName: string;
   role: UserRole;
   navItems: NavItem[];
+  currentPath?: string;
   children: React.ReactNode;
 };
 
@@ -193,12 +194,27 @@ function roleLabel(role: UserRole) {
   return role;
 }
 
+function isNavActive(currentPath: string | undefined, href: string) {
+  if (!currentPath) {
+    return false;
+  }
+  if (href === currentPath) {
+    return true;
+  }
+  // Match sub-paths but not partial prefixes (e.g. /admin/cases matches /admin/cases/123 but not /admin/clients)
+  if (currentPath.startsWith(href + "/")) {
+    return true;
+  }
+  return false;
+}
+
 export function AuthenticatedShell({
   title,
   subtitle,
   userName,
   role,
   navItems,
+  currentPath,
   children,
 }: AuthenticatedShellProps) {
   const orderedNav = normalizeNavItemsByRole(role, navItems);
@@ -282,16 +298,24 @@ export function AuthenticatedShell({
                 <section key={group.label} aria-label={`${group.label} navigation`}>
                   <p className="cg-nav-label text-white/60">{group.label}</p>
                   <ul className="mt-1 flex flex-wrap gap-x-4 gap-y-1.5">
-                    {group.items.map((item) => (
-                      <li key={item.href}>
-                        <Link
-                          href={item.href}
-                          className="cg-nav-label border-b border-transparent pb-0.5 text-white/85 transition hover:border-white/70 hover:text-white"
-                        >
-                          {item.label}
-                        </Link>
-                      </li>
-                    ))}
+                    {group.items.map((item) => {
+                      const active = isNavActive(currentPath, item.href);
+                      return (
+                        <li key={item.href}>
+                          <Link
+                            href={item.href}
+                            className={
+                              active
+                                ? "cg-nav-label cg-nav-link-active pb-0.5 transition"
+                                : "cg-nav-label border-b border-transparent pb-0.5 text-white/85 transition hover:border-white/70 hover:text-white"
+                            }
+                            aria-current={active ? "page" : undefined}
+                          >
+                            {item.label}
+                          </Link>
+                        </li>
+                      );
+                    })}
                   </ul>
                 </section>
               ))}

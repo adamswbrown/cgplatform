@@ -14,13 +14,14 @@ export default async function SpecialistAvailabilityPage() {
         subtitle="Set your manual scheduling availability."
         userName={user.name}
         role={user.role}
+        currentPath="/specialist/availability"
         navItems={[
           { href: "/specialist/sessions", label: "My Sessions" },
           { href: "/specialist/clients", label: "My Clients" },
           { href: "/specialist/availability", label: "My Availability" },
         ]}
       >
-        <p className="rounded-md border border-[color:var(--danger)] bg-red-50 px-3 py-2 text-sm text-[color:var(--danger)]">
+        <p className="cg-alert cg-alert-error">
           Contact operations to link your account to a counsellor profile.
         </p>
       </AuthenticatedShell>
@@ -42,6 +43,7 @@ export default async function SpecialistAvailabilityPage() {
       subtitle={`Set your available ${availability.slotPolicy.slotMinutes}-minute blocks between ${String(availability.slotPolicy.startHour).padStart(2, "0")}:00 and ${String(availability.slotPolicy.endHour).padStart(2, "0")}:00 for manual assignment mode.`}
       userName={user.name}
       role={user.role}
+      currentPath="/specialist/availability"
       navItems={[
         { href: "/specialist/sessions", label: "My Sessions" },
         { href: "/specialist/clients", label: "My Clients" },

@@ -81,7 +81,7 @@ export function FormPinEntry({
       </div>
 
       {error ? (
-        <p className="rounded-md border border-[color:var(--danger)] bg-red-50 px-3 py-2 text-sm text-[color:var(--danger)]">
+        <p className="cg-alert cg-alert-error">
           {error}
         </p>
       ) : null}

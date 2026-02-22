@@ -44,11 +44,11 @@ export default async function IntakeSuccessPage({ searchParams }: IntakeSuccessP
             </p>
 
             {allocationMessage ? (
-              <p className="mt-4 rounded-2xl border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+              <p className="mt-4 cg-alert cg-alert-warning">
                 Scheduling is still blocked: {allocationMessage}
               </p>
             ) : (
-              <p className="mt-4 rounded-2xl border border-emerald-300 bg-emerald-50 px-3 py-2 text-sm text-emerald-900">
+              <p className="mt-4 cg-alert cg-alert-success">
                 The case is in pending review. Once required workflow forms are completed, ops can
                 match and schedule.
               </p>
