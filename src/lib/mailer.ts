@@ -14,6 +14,12 @@ type FormPinEmailInput = {
   expiresAt: Date;
 };
 
+type TermsConfirmationEmailInput = {
+  to: string;
+  caseReference: string;
+  participantName?: string;
+};
+
 type IntakeAccessInviteEmailInput = {
   to: string;
   recipientName?: string | null;
@@ -59,6 +65,26 @@ function buildFormPinHtml(input: FormPinEmailInput) {
       <p style="margin:0 0 10px 0;">
         Open form access page:
         <a href="${htmlEscape(input.accessUrl)}">${htmlEscape(input.accessUrl)}</a>
+      </p>
+    </div>
+  `;
+}
+
+function buildTermsConfirmationHtml(input: TermsConfirmationEmailInput) {
+  const greeting = input.participantName?.trim()
+    ? `Hello ${htmlEscape(input.participantName.trim())},`
+    : "Hello,";
+
+  return `
+    <div style="font-family:Poppins,Arial,sans-serif;line-height:1.5;color:#052E1E">
+      <h2 style="margin:0 0 12px 0;">Thank you. Your Terms of Counselling have been received.</h2>
+      <p style="margin:0 0 10px 0;">${greeting}</p>
+      <p style="margin:0 0 10px 0;">
+        Your signed Terms of Counselling for case
+        <strong>${htmlEscape(input.caseReference)}</strong> have been recorded.
+      </p>
+      <p style="margin:0 0 10px 0;">
+        Please retain a copy of the terms for your records.
       </p>
     </div>
   `;
@@ -116,6 +142,39 @@ export async function sendIntakeConfirmationEmail(input: ConfirmationEmailInput)
   if (!response.ok) {
     const body = await response.text();
     throw new Error(`Confirmation email failed (${response.status}): ${body}`);
+  }
+
+  return { delivered: true, provider: "resend" as const };
+}
+
+export async function sendTermsConfirmationEmail(input: TermsConfirmationEmailInput) {
+  const fromAddress = process.env.CONFIRMATION_EMAIL_FROM || "no-reply@localhost";
+  const resendApiKey = process.env.RESEND_API_KEY;
+
+  if (!resendApiKey) {
+    console.info(
+      `[mailer] Terms confirmation email not sent. RESEND_API_KEY is not configured. target=${input.to}`,
+    );
+    return { delivered: false, provider: "none" as const };
+  }
+
+  const response = await fetch("https://api.resend.com/emails", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${resendApiKey}`,
+    },
+    body: JSON.stringify({
+      from: fromAddress,
+      to: [input.to],
+      subject: "Your Terms of Counselling have been received",
+      html: buildTermsConfirmationHtml(input),
+    }),
+  });
+
+  if (!response.ok) {
+    const body = await response.text();
+    throw new Error(`Terms confirmation email failed (${response.status}): ${body}`);
   }
 
   return { delivered: true, provider: "resend" as const };

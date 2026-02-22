@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import {
   DomainError,
+  appendCaseAuditLog,
   domainErrorMessage,
   ingestAvailabilityPreferenceSubmission,
   ingestAvailabilitySubmission,
@@ -10,6 +11,7 @@ import {
 } from "@/lib/case-service";
 import { db } from "@/lib/db";
 import { hasValidFormAccessSession } from "@/lib/form-access";
+import { sendTermsConfirmationEmail } from "@/lib/mailer";
 
 const AVAILABILITY_SUBMISSION_FORM_TYPE = "AVAILABILITY_SUBMISSION";
 
@@ -200,6 +202,26 @@ export async function POST(request: Request) {
       metadata,
       source: payload.source || "external_form",
     });
+
+    if (normalizedFormType === "TERMS_AND_CONDITIONS") {
+      try {
+        await sendTermsConfirmationEmail({
+          to: payload.participantIdentifier,
+          caseReference: result.caseReference,
+          participantName:
+            typeof metadata.printedName === "string" ? metadata.printedName : undefined,
+        });
+      } catch (emailError) {
+        await appendCaseAuditLog({
+          caseId: result.caseId,
+          action: "TERMS_CONFIRMATION_EMAIL_FAILED",
+          details: {
+            participantEmail: payload.participantIdentifier,
+            error: emailError instanceof Error ? emailError.message : "Unknown email failure",
+          },
+        });
+      }
+    }
 
     return NextResponse.json(
       {
