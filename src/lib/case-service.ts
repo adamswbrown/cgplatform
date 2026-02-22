@@ -2782,11 +2782,15 @@ export async function listSpecialistsForOps() {
       name: true,
       email: true,
       calUserId: true,
+      microsoftBookingsBusinessId: true,
+      microsoftBookingsStaffId: true,
       supportsCouples: true,
       standardStartHour: true,
       standardEndHour: true,
       calIndividualEventTypeId: true,
       calCouplesEventTypeId: true,
+      microsoftBookingsIndividualServiceId: true,
+      microsoftBookingsCouplesServiceId: true,
       capabilities: true,
       sessions: {
         where: {
@@ -4158,9 +4162,13 @@ export async function createSpecialist(input: {
   email: string;
   supportsCouples: boolean;
   capabilities: string[];
-  calUserId: string;
-  calIndividualEventTypeId: string;
+  calUserId?: string;
+  calIndividualEventTypeId?: string;
   calCouplesEventTypeId?: string;
+  microsoftBookingsBusinessId?: string;
+  microsoftBookingsStaffId?: string;
+  microsoftBookingsIndividualServiceId?: string;
+  microsoftBookingsCouplesServiceId?: string;
   password?: string;
   notes?: string;
   standardStartHour?: number;
@@ -4168,7 +4176,15 @@ export async function createSpecialist(input: {
 }) {
   const operationalSettings = await getOperationalSettings();
   const normalizedEmail = input.email.toLowerCase().trim();
-  const normalizedCalUserId = input.calUserId.trim();
+  const normalizedCalUserId = input.calUserId?.trim() || null;
+  const normalizedCalIndividualEventTypeId = input.calIndividualEventTypeId?.trim() || null;
+  const normalizedCalCouplesEventTypeId = input.calCouplesEventTypeId?.trim() || null;
+  const normalizedMicrosoftBookingsBusinessId = input.microsoftBookingsBusinessId?.trim() || null;
+  const normalizedMicrosoftBookingsStaffId = input.microsoftBookingsStaffId?.trim() || null;
+  const normalizedMicrosoftBookingsIndividualServiceId =
+    input.microsoftBookingsIndividualServiceId?.trim() || null;
+  const normalizedMicrosoftBookingsCouplesServiceId =
+    input.microsoftBookingsCouplesServiceId?.trim() || null;
   const normalizedWorkingHours = normalizeSpecialistWorkingHours(
     input.standardStartHour ?? operationalSettings.defaultSpecialistStandardStartHour,
     input.standardEndHour ?? operationalSettings.defaultSpecialistStandardEndHour,
@@ -4187,17 +4203,67 @@ export async function createSpecialist(input: {
     throw new DomainError("A user with this email already exists.", 409);
   }
 
-  const existingCalUserId = await db.specialist.findUnique({
-    where: {
-      calUserId: normalizedCalUserId,
-    },
-    select: {
-      id: true,
-    },
-  });
+  if (operationalSettings.schedulingEngineType === "calcom") {
+    if (!normalizedCalUserId || !normalizedCalIndividualEventTypeId) {
+      throw new DomainError(
+        "Cal.com user id and individual event type id are required when the scheduling engine is Cal.com.",
+        409,
+      );
+    }
+    if (input.supportsCouples && !normalizedCalCouplesEventTypeId) {
+      throw new DomainError(
+        "Cal.com couples event type id is required for counsellors that support couples.",
+        409,
+      );
+    }
+  }
 
-  if (existingCalUserId) {
-    throw new DomainError("Another counsellor already uses this Cal.com user id.", 409);
+  if (operationalSettings.schedulingEngineType === "microsoft_bookings") {
+    if (!normalizedMicrosoftBookingsStaffId || !normalizedMicrosoftBookingsIndividualServiceId) {
+      throw new DomainError(
+        "Microsoft Bookings staff id and individual service id are required when the scheduling engine is Microsoft Bookings.",
+        409,
+      );
+    }
+    if (input.supportsCouples && !normalizedMicrosoftBookingsCouplesServiceId) {
+      throw new DomainError(
+        "Microsoft Bookings couples service id is required for counsellors that support couples.",
+        409,
+      );
+    }
+  }
+
+  if (normalizedCalUserId) {
+    const existingCalUserId = await db.specialist.findFirst({
+      where: {
+        calUserId: normalizedCalUserId,
+      },
+      select: {
+        id: true,
+      },
+    });
+
+    if (existingCalUserId) {
+      throw new DomainError("Another counsellor already uses this Cal.com user id.", 409);
+    }
+  }
+
+  if (normalizedMicrosoftBookingsStaffId) {
+    const existingMicrosoftBookingsStaffId = await db.specialist.findFirst({
+      where: {
+        microsoftBookingsStaffId: normalizedMicrosoftBookingsStaffId,
+      },
+      select: {
+        id: true,
+      },
+    });
+
+    if (existingMicrosoftBookingsStaffId) {
+      throw new DomainError(
+        "Another counsellor already uses this Microsoft Bookings staff id.",
+        409,
+      );
+    }
   }
 
   const passwordHash = await hash(input.password || "password123", 10);
@@ -4212,8 +4278,12 @@ export async function createSpecialist(input: {
       capabilities: input.capabilities,
       notes: input.notes?.trim() || null,
       calUserId: normalizedCalUserId,
-      calIndividualEventTypeId: input.calIndividualEventTypeId.trim(),
-      calCouplesEventTypeId: input.calCouplesEventTypeId?.trim() || null,
+      calIndividualEventTypeId: normalizedCalIndividualEventTypeId,
+      calCouplesEventTypeId: normalizedCalCouplesEventTypeId,
+      microsoftBookingsBusinessId: normalizedMicrosoftBookingsBusinessId,
+      microsoftBookingsStaffId: normalizedMicrosoftBookingsStaffId,
+      microsoftBookingsIndividualServiceId: normalizedMicrosoftBookingsIndividualServiceId,
+      microsoftBookingsCouplesServiceId: normalizedMicrosoftBookingsCouplesServiceId,
       userAccount: {
         create: {
           email: normalizedEmail,
@@ -4236,39 +4306,68 @@ export async function updateSpecialistProfile(input: {
   standardEndHour: number;
   capabilities: string[];
   notes?: string;
-  calUserId: string;
-  calIndividualEventTypeId: string;
+  calUserId?: string;
+  calIndividualEventTypeId?: string;
   calCouplesEventTypeId?: string;
+  microsoftBookingsBusinessId?: string;
+  microsoftBookingsStaffId?: string;
+  microsoftBookingsIndividualServiceId?: string;
+  microsoftBookingsCouplesServiceId?: string;
   actorUserId: string;
 }) {
+  const operationalSettings = await getOperationalSettings();
   const normalizedName = input.name.trim();
   const normalizedEmail = input.email.trim().toLowerCase();
   const normalizedNotes = input.notes?.trim() || null;
-  const normalizedCalUserId = input.calUserId.trim();
-  const normalizedIndividualEventTypeId = input.calIndividualEventTypeId.trim();
+  const normalizedCalUserId = input.calUserId?.trim() || null;
+  const normalizedIndividualEventTypeId = input.calIndividualEventTypeId?.trim() || null;
   const normalizedCouplesEventTypeId = input.calCouplesEventTypeId?.trim() || null;
+  const normalizedMicrosoftBookingsBusinessId = input.microsoftBookingsBusinessId?.trim() || null;
+  const normalizedMicrosoftBookingsStaffId = input.microsoftBookingsStaffId?.trim() || null;
+  const normalizedMicrosoftBookingsIndividualServiceId =
+    input.microsoftBookingsIndividualServiceId?.trim() || null;
+  const normalizedMicrosoftBookingsCouplesServiceId =
+    input.microsoftBookingsCouplesServiceId?.trim() || null;
   const normalizedWorkingHours = normalizeSpecialistWorkingHours(
     input.standardStartHour,
     input.standardEndHour,
   );
 
-  if (
-    !normalizedName ||
-    !normalizedEmail ||
-    !normalizedCalUserId ||
-    !normalizedIndividualEventTypeId
-  ) {
+  if (!normalizedName || !normalizedEmail) {
     throw new DomainError(
-      "Name, email, Cal.com user id, and individual event type id are required.",
+      "Name and email are required.",
       409,
     );
   }
 
-  if (input.supportsCouples && !normalizedCouplesEventTypeId) {
-    throw new DomainError(
-      "Couples event type id is required for counsellors that support couples.",
-      409,
-    );
+  if (operationalSettings.schedulingEngineType === "calcom") {
+    if (!normalizedCalUserId || !normalizedIndividualEventTypeId) {
+      throw new DomainError(
+        "Cal.com user id and individual event type id are required when the scheduling engine is Cal.com.",
+        409,
+      );
+    }
+    if (input.supportsCouples && !normalizedCouplesEventTypeId) {
+      throw new DomainError(
+        "Cal.com couples event type id is required for counsellors that support couples.",
+        409,
+      );
+    }
+  }
+
+  if (operationalSettings.schedulingEngineType === "microsoft_bookings") {
+    if (!normalizedMicrosoftBookingsStaffId || !normalizedMicrosoftBookingsIndividualServiceId) {
+      throw new DomainError(
+        "Microsoft Bookings staff id and individual service id are required when the scheduling engine is Microsoft Bookings.",
+        409,
+      );
+    }
+    if (input.supportsCouples && !normalizedMicrosoftBookingsCouplesServiceId) {
+      throw new DomainError(
+        "Microsoft Bookings couples service id is required for counsellors that support couples.",
+        409,
+      );
+    }
   }
 
   const specialist = await db.specialist.findUnique({
@@ -4320,20 +4419,40 @@ export async function updateSpecialistProfile(input: {
     throw new DomainError("Another counsellor already uses this email.", 409);
   }
 
-  const calUserConflict = await db.specialist.findFirst({
-    where: {
-      calUserId: normalizedCalUserId,
-      NOT: {
-        id: specialist.id,
+  if (normalizedCalUserId) {
+    const calUserConflict = await db.specialist.findFirst({
+      where: {
+        calUserId: normalizedCalUserId,
+        NOT: {
+          id: specialist.id,
+        },
       },
-    },
-    select: {
-      id: true,
-    },
-  });
+      select: {
+        id: true,
+      },
+    });
 
-  if (calUserConflict) {
-    throw new DomainError("Another counsellor already uses this Cal.com user id.", 409);
+    if (calUserConflict) {
+      throw new DomainError("Another counsellor already uses this Cal.com user id.", 409);
+    }
+  }
+
+  if (normalizedMicrosoftBookingsStaffId) {
+    const microsoftBookingsStaffConflict = await db.specialist.findFirst({
+      where: {
+        microsoftBookingsStaffId: normalizedMicrosoftBookingsStaffId,
+        NOT: {
+          id: specialist.id,
+        },
+      },
+      select: {
+        id: true,
+      },
+    });
+
+    if (microsoftBookingsStaffConflict) {
+      throw new DomainError("Another counsellor already uses this Microsoft Bookings staff id.", 409);
+    }
   }
 
   const changedFields = {
@@ -4393,6 +4512,36 @@ export async function updateSpecialistProfile(input: {
             to: normalizedCouplesEventTypeId,
           }
         : null,
+    microsoftBookingsBusinessId:
+      (specialist.microsoftBookingsBusinessId || null) !== normalizedMicrosoftBookingsBusinessId
+        ? {
+            from: specialist.microsoftBookingsBusinessId || null,
+            to: normalizedMicrosoftBookingsBusinessId,
+          }
+        : null,
+    microsoftBookingsStaffId:
+      (specialist.microsoftBookingsStaffId || null) !== normalizedMicrosoftBookingsStaffId
+        ? {
+            from: specialist.microsoftBookingsStaffId || null,
+            to: normalizedMicrosoftBookingsStaffId,
+          }
+        : null,
+    microsoftBookingsIndividualServiceId:
+      (specialist.microsoftBookingsIndividualServiceId || null) !==
+      normalizedMicrosoftBookingsIndividualServiceId
+        ? {
+            from: specialist.microsoftBookingsIndividualServiceId || null,
+            to: normalizedMicrosoftBookingsIndividualServiceId,
+          }
+        : null,
+    microsoftBookingsCouplesServiceId:
+      (specialist.microsoftBookingsCouplesServiceId || null) !==
+      normalizedMicrosoftBookingsCouplesServiceId
+        ? {
+            from: specialist.microsoftBookingsCouplesServiceId || null,
+            to: normalizedMicrosoftBookingsCouplesServiceId,
+          }
+        : null,
   };
 
   return db.$transaction(async (tx) => {
@@ -4412,6 +4561,10 @@ export async function updateSpecialistProfile(input: {
         calUserId: normalizedCalUserId,
         calIndividualEventTypeId: normalizedIndividualEventTypeId,
         calCouplesEventTypeId: normalizedCouplesEventTypeId,
+        microsoftBookingsBusinessId: normalizedMicrosoftBookingsBusinessId,
+        microsoftBookingsStaffId: normalizedMicrosoftBookingsStaffId,
+        microsoftBookingsIndividualServiceId: normalizedMicrosoftBookingsIndividualServiceId,
+        microsoftBookingsCouplesServiceId: normalizedMicrosoftBookingsCouplesServiceId,
       },
     });
 

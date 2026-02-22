@@ -76,7 +76,14 @@ Provider implementations:
 
 - Manual engine (deterministic simulation) via `ManualSchedulingProvider` (`src/lib/scheduling/manual-provider.ts`)
 - `CalcomSchedulingProvider` placeholder (`src/lib/scheduling/calcom-provider.ts`)
-- `MicrosoftBookingsSchedulingProvider` placeholder (`src/lib/scheduling/microsoft-bookings-provider.ts`)
+- `MicrosoftBookingsSchedulingProvider` implementation (`src/lib/scheduling/microsoft-bookings-provider.ts`)
+
+Microsoft Bookings integration notes:
+
+- Auth uses Azure managed identity by default (`MICROSOFT_GRAPH_AUTH_MODE=managed_identity`).
+- Optional fallback auth mode supports app registration secret (`MICROSOFT_GRAPH_AUTH_MODE=client_secret`).
+- Counsellors can store Bookings staff/service mappings in `/admin/specialists` and `/admin/specialists/:id`.
+- Polling reconciliation endpoint: `POST /api/provider/sync/microsoft-bookings` (OPS auth or `x-provider-sync-key`).
 
 Factory:
 
@@ -243,6 +250,107 @@ SCHEDULING_ASSIGNMENT_MODE=auto npm run dev
 PLAYWRIGHT_BASE_URL=http://127.0.0.1:3001 npm run screenshots:personas
 ```
 
+## Microsoft Bookings Setup (Azure Managed Identity)
+
+This section describes the production setup for `microsoft_bookings` scheduling in this app.
+
+### 1) Prepare Microsoft Bookings in M365
+
+1. Create (or select) one Microsoft Bookings business for your counselling team.
+2. Create Bookings services for:
+   - individual sessions
+   - couples sessions
+3. Add each counsellor as Bookings staff.
+4. In Bookings staffing settings, ensure personal calendar events from Outlook can block availability.
+
+### 2) Configure identity and Graph access
+
+Default auth mode in this app is Azure managed identity (`MICROSOFT_GRAPH_AUTH_MODE=managed_identity`).
+
+For Azure-hosted runtime:
+
+1. Enable a managed identity on the hosting resource (App Service, Container App, Function, VM, etc.).
+2. In Microsoft Entra ID, grant Microsoft Graph application permissions required for Bookings APIs used by this app:
+   - read staff availability
+   - create/list/cancel appointments
+3. Grant admin consent.
+4. If using a user-assigned managed identity, set `AZURE_CLIENT_ID`.
+
+For local/non-Azure runtime, use client-secret fallback:
+
+- `MICROSOFT_GRAPH_AUTH_MODE=client_secret`
+- `MICROSOFT_GRAPH_TENANT_ID`
+- `MICROSOFT_GRAPH_CLIENT_ID`
+- `MICROSOFT_GRAPH_CLIENT_SECRET`
+
+### 3) Set required environment variables
+
+```bash
+# Scheduler selection
+SCHEDULING_ENGINE=microsoft_bookings
+# or legacy fallback:
+# SCHEDULING_PROVIDER=microsoft_bookings
+
+# Graph auth
+MICROSOFT_GRAPH_AUTH_MODE=managed_identity
+# Optional for user-assigned MI
+AZURE_CLIENT_ID=
+
+# Optional client-secret fallback values
+MICROSOFT_GRAPH_TENANT_ID=
+MICROSOFT_GRAPH_CLIENT_ID=
+MICROSOFT_GRAPH_CLIENT_SECRET=
+
+# Optional Graph base URL override
+MICROSOFT_GRAPH_BASE_URL=https://graph.microsoft.com/v1.0
+
+# Optional default Bookings business ID (used when specialist-level business ID is blank)
+MICROSOFT_BOOKINGS_BUSINESS_ID=
+
+# Optional provider tuning
+MICROSOFT_BOOKINGS_DEFAULT_TIME_ZONE=UTC
+MICROSOFT_BOOKINGS_AVAILABILITY_HORIZON_DAYS=30
+MICROSOFT_BOOKINGS_SLOT_INCREMENT_MINUTES=15
+
+# Optional polling sync endpoint protection + tuning
+MICROSOFT_BOOKINGS_SYNC_SECRET=
+MICROSOFT_BOOKINGS_SYNC_LOOKBACK_HOURS=24
+MICROSOFT_BOOKINGS_SYNC_LOOKAHEAD_DAYS=30
+MICROSOFT_BOOKINGS_SYNC_FETCH_LIMIT=500
+```
+
+### 4) Configure app settings and counsellor mappings
+
+1. Open `/admin/settings/operations`.
+2. Set `Scheduling engine` to `Microsoft Bookings`.
+3. Choose assignment mode (`manual` or `auto`) for your workflow.
+4. Open `/admin/specialists` (or `/admin/specialists/:id`) and set for each counsellor:
+   - `Microsoft Bookings staff id`
+   - `Microsoft Bookings individual service id`
+   - `Microsoft Bookings couples service id` (required when counsellor supports couples)
+   - optional `Microsoft Bookings business id` override
+
+### 5) Validate integration
+
+1. Provider availability smoke test:
+
+```bash
+curl -s "http://127.0.0.1:3001/api/public-availability?counsellingType=individual&limit=5" | jq
+```
+
+2. Ops scheduling test:
+   - assign/allocate a case from `/admin/cases/:id` or `/admin/assignments`
+   - confirm a `Session` row is created with `providerType=microsoft_bookings`
+
+3. Polling reconciliation test:
+
+```bash
+curl -X POST "http://127.0.0.1:3001/api/provider/sync/microsoft-bookings" \
+  -H "x-provider-sync-key: $MICROSOFT_BOOKINGS_SYNC_SECRET"
+```
+
+Response includes counts for checked, rescheduled, cancelled, unchanged, and errored records.
+
 ## Demo Credentials
 
 - Ops: `ops@demo.local / password123`
@@ -311,6 +419,7 @@ Specialist:
 - `POST /api/cases/:id/override`
 - `POST /api/documents/:id/complete`
 - `POST /api/provider/events`
+- `POST /api/provider/sync/microsoft-bookings`
 - `POST /dev/simulate-week`
 - `POST /dev/create-test-cases`
 - `POST /dev/provider/cancel/:bookingId`

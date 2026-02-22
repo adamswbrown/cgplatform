@@ -345,6 +345,8 @@ export async function overrideAssignmentAction(formData: FormData) {
 
 export async function createSpecialistAction(formData: FormData) {
   await requirePageUser([UserRole.OPS]);
+  const operationalSettings = await getOperationalSettings();
+  const schedulingEngineType = operationalSettings.schedulingEngineType;
 
   const name = String(formData.get("name") || "").trim();
   const email = String(formData.get("email") || "").trim();
@@ -358,6 +360,16 @@ export async function createSpecialistAction(formData: FormData) {
   const calUserId = String(formData.get("calUserId") || "").trim();
   const calIndividualEventTypeId = String(formData.get("calIndividualEventTypeId") || "").trim();
   const calCouplesEventTypeId = String(formData.get("calCouplesEventTypeId") || "").trim();
+  const microsoftBookingsBusinessId = String(
+    formData.get("microsoftBookingsBusinessId") || "",
+  ).trim();
+  const microsoftBookingsStaffId = String(formData.get("microsoftBookingsStaffId") || "").trim();
+  const microsoftBookingsIndividualServiceId = String(
+    formData.get("microsoftBookingsIndividualServiceId") || "",
+  ).trim();
+  const microsoftBookingsCouplesServiceId = String(
+    formData.get("microsoftBookingsCouplesServiceId") || "",
+  ).trim();
   const redirectTo = String(formData.get("redirectTo") || "/admin/specialists");
   let standardStartHour = 9;
   let standardEndHour = 18;
@@ -374,20 +386,61 @@ export async function createSpecialistAction(formData: FormData) {
     redirectWithActionError(redirectTo, error);
   }
 
-  if (!name || !email || !calUserId || !calIndividualEventTypeId) {
+  if (!name || !email) {
     redirect(
       encodeErrorPath(
         redirectTo,
-        "Name, email, Cal.com user id, and individual event type id are required.",
+        "Name and email are required.",
       ),
     );
   }
 
-  if (supportsCouples && !calCouplesEventTypeId) {
+  if (
+    schedulingEngineType === "calcom" &&
+    (!calUserId || !calIndividualEventTypeId)
+  ) {
     redirect(
       encodeErrorPath(
         redirectTo,
-        "Couples event type id is required when counsellor supports couples.",
+        "Cal.com user id and individual event type id are required when the scheduling engine is Cal.com.",
+      ),
+    );
+  }
+
+  if (
+    schedulingEngineType === "calcom" &&
+    supportsCouples &&
+    !calCouplesEventTypeId
+  ) {
+    redirect(
+      encodeErrorPath(
+        redirectTo,
+        "Cal.com couples event type id is required when counsellor supports couples.",
+      ),
+    );
+  }
+
+  if (
+    schedulingEngineType === "microsoft_bookings" &&
+    (!microsoftBookingsStaffId || !microsoftBookingsIndividualServiceId)
+  ) {
+    redirect(
+      encodeErrorPath(
+        redirectTo,
+        "Microsoft Bookings staff id and individual service id are required when the scheduling engine is Microsoft Bookings.",
+      ),
+    );
+  }
+
+  if (
+    schedulingEngineType === "microsoft_bookings" &&
+    supportsCouples &&
+    !microsoftBookingsCouplesServiceId
+  ) {
+    redirect(
+      encodeErrorPath(
+        redirectTo,
+        "Microsoft Bookings couples service id is required when counsellor supports couples.",
       ),
     );
   }
@@ -412,6 +465,11 @@ export async function createSpecialistAction(formData: FormData) {
       calUserId,
       calIndividualEventTypeId,
       calCouplesEventTypeId: calCouplesEventTypeId || undefined,
+      microsoftBookingsBusinessId: microsoftBookingsBusinessId || undefined,
+      microsoftBookingsStaffId: microsoftBookingsStaffId || undefined,
+      microsoftBookingsIndividualServiceId:
+        microsoftBookingsIndividualServiceId || undefined,
+      microsoftBookingsCouplesServiceId: microsoftBookingsCouplesServiceId || undefined,
       standardStartHour,
       standardEndHour,
     });
@@ -433,6 +491,8 @@ export async function createSpecialistAction(formData: FormData) {
 
 export async function updateSpecialistProfileAction(formData: FormData) {
   const user = await requirePageUser([UserRole.OPS]);
+  const operationalSettings = await getOperationalSettings();
+  const schedulingEngineType = operationalSettings.schedulingEngineType;
 
   const specialistId = String(formData.get("specialistId") || "").trim();
   const name = String(formData.get("name") || "").trim();
@@ -447,6 +507,16 @@ export async function updateSpecialistProfileAction(formData: FormData) {
   const calUserId = String(formData.get("calUserId") || "").trim();
   const calIndividualEventTypeId = String(formData.get("calIndividualEventTypeId") || "").trim();
   const calCouplesEventTypeId = String(formData.get("calCouplesEventTypeId") || "").trim();
+  const microsoftBookingsBusinessId = String(
+    formData.get("microsoftBookingsBusinessId") || "",
+  ).trim();
+  const microsoftBookingsStaffId = String(formData.get("microsoftBookingsStaffId") || "").trim();
+  const microsoftBookingsIndividualServiceId = String(
+    formData.get("microsoftBookingsIndividualServiceId") || "",
+  ).trim();
+  const microsoftBookingsCouplesServiceId = String(
+    formData.get("microsoftBookingsCouplesServiceId") || "",
+  ).trim();
   const redirectTo = String(formData.get("redirectTo") || `/admin/specialists/${specialistId}`);
   let standardStartHour = 9;
   let standardEndHour = 18;
@@ -463,20 +533,61 @@ export async function updateSpecialistProfileAction(formData: FormData) {
     redirectWithActionError(redirectTo, error);
   }
 
-  if (!specialistId || !name || !email || !calUserId || !calIndividualEventTypeId) {
+  if (!specialistId || !name || !email) {
     redirect(
       encodeErrorPath(
         redirectTo,
-        "Counsellor id, name, email, Cal.com user id, and individual event type id are required.",
+        "Counsellor id, name, and email are required.",
       ),
     );
   }
 
-  if (supportsCouples && !calCouplesEventTypeId) {
+  if (
+    schedulingEngineType === "calcom" &&
+    (!calUserId || !calIndividualEventTypeId)
+  ) {
     redirect(
       encodeErrorPath(
         redirectTo,
-        "Couples event type id is required when counsellor supports couples.",
+        "Cal.com user id and individual event type id are required when the scheduling engine is Cal.com.",
+      ),
+    );
+  }
+
+  if (
+    schedulingEngineType === "calcom" &&
+    supportsCouples &&
+    !calCouplesEventTypeId
+  ) {
+    redirect(
+      encodeErrorPath(
+        redirectTo,
+        "Cal.com couples event type id is required when counsellor supports couples.",
+      ),
+    );
+  }
+
+  if (
+    schedulingEngineType === "microsoft_bookings" &&
+    (!microsoftBookingsStaffId || !microsoftBookingsIndividualServiceId)
+  ) {
+    redirect(
+      encodeErrorPath(
+        redirectTo,
+        "Microsoft Bookings staff id and individual service id are required when the scheduling engine is Microsoft Bookings.",
+      ),
+    );
+  }
+
+  if (
+    schedulingEngineType === "microsoft_bookings" &&
+    supportsCouples &&
+    !microsoftBookingsCouplesServiceId
+  ) {
+    redirect(
+      encodeErrorPath(
+        redirectTo,
+        "Microsoft Bookings couples service id is required when counsellor supports couples.",
       ),
     );
   }
@@ -504,6 +615,11 @@ export async function updateSpecialistProfileAction(formData: FormData) {
       calUserId,
       calIndividualEventTypeId,
       calCouplesEventTypeId: calCouplesEventTypeId || undefined,
+      microsoftBookingsBusinessId: microsoftBookingsBusinessId || undefined,
+      microsoftBookingsStaffId: microsoftBookingsStaffId || undefined,
+      microsoftBookingsIndividualServiceId:
+        microsoftBookingsIndividualServiceId || undefined,
+      microsoftBookingsCouplesServiceId: microsoftBookingsCouplesServiceId || undefined,
       standardStartHour,
       standardEndHour,
       actorUserId: user.id,

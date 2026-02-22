@@ -163,9 +163,13 @@ model Specialist {
   standardEndHour           Int          @default(18)
   capabilities              String[]     @default([])
   notes                     String?
-  calUserId                 String       @unique
-  calIndividualEventTypeId  String
+  calUserId                 String?      @unique
+  calIndividualEventTypeId  String?
   calCouplesEventTypeId     String?
+  microsoftBookingsBusinessId String?
+  microsoftBookingsStaffId  String?      @unique
+  microsoftBookingsIndividualServiceId String?
+  microsoftBookingsCouplesServiceId String?
   sessions                  Session[]
   assignedCases             Case[]       @relation("CaseAssignedSpecialist")
   availabilityWindows       SpecialistAvailabilityWindow[]

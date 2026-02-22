@@ -34,9 +34,14 @@ export default async function SpecialistProfilePage({
   const updated = typeof query.updated === "string";
   const now = new Date();
   const usesCalCom = operationalSettings.schedulingEngineType === "calcom";
+  const usesMicrosoftBookings = operationalSettings.schedulingEngineType === "microsoft_bookings";
   const calSectionMutedClass = usesCalCom ? "" : "opacity-60";
   const calFieldClass = `w-full rounded-md border border-[color:var(--border)] px-2 py-2 text-sm ${
     usesCalCom ? "" : "bg-slate-50 text-[color:var(--muted)]"
+  }`;
+  const bookingsSectionMutedClass = usesMicrosoftBookings ? "" : "opacity-60";
+  const bookingsFieldClass = `w-full rounded-md border border-[color:var(--border)] px-2 py-2 text-sm ${
+    usesMicrosoftBookings ? "" : "bg-slate-50 text-[color:var(--muted)]"
   }`;
 
   const upcomingSessions = specialist.sessions
@@ -196,9 +201,35 @@ export default async function SpecialistProfilePage({
                   Cal.com fields are stored but inactive.
                 </p>
               ) : null}
-              <p className="mt-2 text-sm">User ID: {specialist.calUserId}</p>
-              <p className="text-sm">Individual Event Type: {specialist.calIndividualEventTypeId}</p>
+              <p className="mt-2 text-sm">User ID: {specialist.calUserId || "-"}</p>
+              <p className="text-sm">
+                Individual Event Type: {specialist.calIndividualEventTypeId || "-"}
+              </p>
               <p className="text-sm">Couples Event Type: {specialist.calCouplesEventTypeId || "-"}</p>
+            </div>
+
+            <div
+              className={`rounded-xl border border-[color:var(--border)] p-4 md:col-span-2 ${bookingsSectionMutedClass}`}
+            >
+              <p className="text-xs font-semibold uppercase tracking-wide text-[color:var(--muted)]">
+                Microsoft Bookings mappings
+              </p>
+              {!usesMicrosoftBookings ? (
+                <p className="mt-1 text-xs text-[color:var(--muted)]">
+                  Engine is set to <strong>{operationalSettings.schedulingEngineType}</strong>;
+                  Bookings fields are stored but inactive.
+                </p>
+              ) : null}
+              <p className="mt-2 text-sm">
+                Business ID: {specialist.microsoftBookingsBusinessId || "(global default)"}
+              </p>
+              <p className="text-sm">Staff ID: {specialist.microsoftBookingsStaffId || "-"}</p>
+              <p className="text-sm">
+                Individual Service ID: {specialist.microsoftBookingsIndividualServiceId || "-"}
+              </p>
+              <p className="text-sm">
+                Couples Service ID: {specialist.microsoftBookingsCouplesServiceId || "-"}
+              </p>
             </div>
 
             <div className="rounded-xl border border-[color:var(--border)] p-4 md:col-span-2">
@@ -271,8 +302,7 @@ export default async function SpecialistProfilePage({
                 <input
                   id="calUserId"
                   name="calUserId"
-                  defaultValue={specialist.calUserId}
-                  required
+                  defaultValue={specialist.calUserId || ""}
                   className={calFieldClass}
                 />
               </div>
@@ -317,8 +347,7 @@ export default async function SpecialistProfilePage({
                 <input
                   id="calIndividualEventTypeId"
                   name="calIndividualEventTypeId"
-                  defaultValue={specialist.calIndividualEventTypeId}
-                  required
+                  defaultValue={specialist.calIndividualEventTypeId || ""}
                   className={calFieldClass}
                 />
               </div>
@@ -332,6 +361,63 @@ export default async function SpecialistProfilePage({
                   name="calCouplesEventTypeId"
                   defaultValue={specialist.calCouplesEventTypeId || ""}
                   className={calFieldClass}
+                />
+              </div>
+
+              <div>
+                <label
+                  htmlFor="microsoftBookingsBusinessId"
+                  className="mb-1 block text-xs font-medium"
+                >
+                  Microsoft Bookings business id (optional override)
+                </label>
+                <input
+                  id="microsoftBookingsBusinessId"
+                  name="microsoftBookingsBusinessId"
+                  defaultValue={specialist.microsoftBookingsBusinessId || ""}
+                  className={bookingsFieldClass}
+                />
+              </div>
+
+              <div>
+                <label htmlFor="microsoftBookingsStaffId" className="mb-1 block text-xs font-medium">
+                  Microsoft Bookings staff id
+                </label>
+                <input
+                  id="microsoftBookingsStaffId"
+                  name="microsoftBookingsStaffId"
+                  defaultValue={specialist.microsoftBookingsStaffId || ""}
+                  className={bookingsFieldClass}
+                />
+              </div>
+
+              <div>
+                <label
+                  htmlFor="microsoftBookingsIndividualServiceId"
+                  className="mb-1 block text-xs font-medium"
+                >
+                  Microsoft Bookings individual service id
+                </label>
+                <input
+                  id="microsoftBookingsIndividualServiceId"
+                  name="microsoftBookingsIndividualServiceId"
+                  defaultValue={specialist.microsoftBookingsIndividualServiceId || ""}
+                  className={bookingsFieldClass}
+                />
+              </div>
+
+              <div>
+                <label
+                  htmlFor="microsoftBookingsCouplesServiceId"
+                  className="mb-1 block text-xs font-medium"
+                >
+                  Microsoft Bookings couples service id
+                </label>
+                <input
+                  id="microsoftBookingsCouplesServiceId"
+                  name="microsoftBookingsCouplesServiceId"
+                  defaultValue={specialist.microsoftBookingsCouplesServiceId || ""}
+                  className={bookingsFieldClass}
                 />
               </div>
 

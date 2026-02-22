@@ -23,11 +23,19 @@ export default async function SpecialistManagementPage({
   const error = typeof params.error === "string" ? params.error : null;
   const redirectTo = "/admin/specialists";
   const usesCalCom = operationalSettings.schedulingEngineType === "calcom";
+  const usesMicrosoftBookings = operationalSettings.schedulingEngineType === "microsoft_bookings";
   const calLabelClass = usesCalCom ? "text-[color:var(--foreground)]" : "text-[color:var(--muted)]";
   const calInputClass = `w-full rounded-md border border-[color:var(--border)] px-3 py-2 text-sm ${
     usesCalCom ? "" : "bg-slate-50 text-[color:var(--muted)]"
   }`;
+  const bookingsLabelClass = usesMicrosoftBookings
+    ? "text-[color:var(--foreground)]"
+    : "text-[color:var(--muted)]";
+  const bookingsInputClass = `w-full rounded-md border border-[color:var(--border)] px-3 py-2 text-sm ${
+    usesMicrosoftBookings ? "" : "bg-slate-50 text-[color:var(--muted)]"
+  }`;
   const calCellClass = usesCalCom ? "" : "text-[color:var(--muted)]";
+  const bookingsCellClass = usesMicrosoftBookings ? "" : "text-[color:var(--muted)]";
 
   return (
     <AuthenticatedShell
@@ -54,10 +62,22 @@ export default async function SpecialistManagementPage({
 
       <section className="rounded-2xl border border-[color:var(--border)] bg-[color:var(--surface)] p-5 shadow-sm">
         <h2 className="text-lg font-semibold">Create counsellor</h2>
-        {!usesCalCom ? (
+        {!usesCalCom && !usesMicrosoftBookings ? (
           <p className="mt-2 rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-[color:var(--muted)]">
             Scheduling engine is set to <strong>{operationalSettings.schedulingEngineType}</strong>.
-            Cal.com IDs are stored for compatibility but are not active in this mode.
+            External scheduler IDs are optional in this mode.
+          </p>
+        ) : null}
+        {usesMicrosoftBookings ? (
+          <p className="mt-2 rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-[color:var(--muted)]">
+            Scheduling engine is set to <strong>microsoft_bookings</strong>. Microsoft Bookings
+            staff/service IDs are used for runtime scheduling.
+          </p>
+        ) : null}
+        {usesCalCom ? (
+          <p className="mt-2 rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-[color:var(--muted)]">
+            Scheduling engine is set to <strong>calcom</strong>. Cal.com IDs are used for runtime
+            scheduling.
           </p>
         ) : null}
         <form action={createSpecialistAction} className="mt-3 grid gap-3 md:grid-cols-2">
@@ -139,7 +159,6 @@ export default async function SpecialistManagementPage({
             <input
               id="calUserId"
               name="calUserId"
-              required
               placeholder="counsellor-cal-user-id"
               className={calInputClass}
             />
@@ -155,7 +174,6 @@ export default async function SpecialistManagementPage({
             <input
               id="calIndividualEventTypeId"
               name="calIndividualEventTypeId"
-              required
               placeholder="1001"
               className={calInputClass}
             />
@@ -173,6 +191,66 @@ export default async function SpecialistManagementPage({
               name="calCouplesEventTypeId"
               placeholder="1002"
               className={calInputClass}
+            />
+          </div>
+
+          <div>
+            <label
+              htmlFor="microsoftBookingsBusinessId"
+              className={`mb-1 block text-sm font-medium ${bookingsLabelClass}`}
+            >
+              Microsoft Bookings business id (optional override)
+            </label>
+            <input
+              id="microsoftBookingsBusinessId"
+              name="microsoftBookingsBusinessId"
+              placeholder="contoso@tenant.onmicrosoft.com"
+              className={bookingsInputClass}
+            />
+          </div>
+
+          <div>
+            <label
+              htmlFor="microsoftBookingsStaffId"
+              className={`mb-1 block text-sm font-medium ${bookingsLabelClass}`}
+            >
+              Microsoft Bookings staff id
+            </label>
+            <input
+              id="microsoftBookingsStaffId"
+              name="microsoftBookingsStaffId"
+              placeholder="staff-id-guid"
+              className={bookingsInputClass}
+            />
+          </div>
+
+          <div>
+            <label
+              htmlFor="microsoftBookingsIndividualServiceId"
+              className={`mb-1 block text-sm font-medium ${bookingsLabelClass}`}
+            >
+              Microsoft Bookings individual service id
+            </label>
+            <input
+              id="microsoftBookingsIndividualServiceId"
+              name="microsoftBookingsIndividualServiceId"
+              placeholder="service-id-guid"
+              className={bookingsInputClass}
+            />
+          </div>
+
+          <div>
+            <label
+              htmlFor="microsoftBookingsCouplesServiceId"
+              className={`mb-1 block text-sm font-medium ${bookingsLabelClass}`}
+            >
+              Microsoft Bookings couples service id (required if supports couples)
+            </label>
+            <input
+              id="microsoftBookingsCouplesServiceId"
+              name="microsoftBookingsCouplesServiceId"
+              placeholder="service-id-guid"
+              className={bookingsInputClass}
             />
           </div>
 
@@ -224,8 +302,10 @@ export default async function SpecialistManagementPage({
                 <th className="px-3 py-2 font-semibold">Email</th>
                 <th className="px-3 py-2 font-semibold">Standard Hours</th>
                 <th className={`px-3 py-2 font-semibold ${calCellClass}`}>Cal User</th>
+                <th className={`px-3 py-2 font-semibold ${bookingsCellClass}`}>Bookings Staff</th>
                 <th className="px-3 py-2 font-semibold">Couples</th>
                 <th className={`px-3 py-2 font-semibold ${calCellClass}`}>Event Type IDs</th>
+                <th className={`px-3 py-2 font-semibold ${bookingsCellClass}`}>Bookings Service IDs</th>
                 <th className="px-3 py-2 font-semibold">Capabilities</th>
                 <th className="px-3 py-2 font-semibold">Next Session</th>
                 <th className="px-3 py-2 font-semibold">Actions</th>
@@ -234,7 +314,7 @@ export default async function SpecialistManagementPage({
             <tbody className="divide-y divide-[color:var(--border)]">
               {specialists.length === 0 ? (
                 <tr>
-                  <td colSpan={9}>
+                  <td colSpan={11}>
                     <div className="cg-empty-state py-12">
                       <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="cg-empty-state-icon">
                         <path strokeLinecap="round" strokeLinejoin="round" d="M4.26 10.147a60.438 60.438 0 0 0-.491 6.347A48.62 48.62 0 0 1 12 20.904a48.62 48.62 0 0 1 8.232-4.41 60.46 60.46 0 0 0-.491-6.347m-15.482 0a23.838 23.838 0 0 0-2.688 3.291c5.852.952 10.523 3.655 12.469 5.155a48.559 48.559 0 0 1 12.469-5.155 23.837 23.837 0 0 0-2.688-3.291m-15.482 0A23.94 23.94 0 0 1 12 3.89a23.94 23.94 0 0 1 7.74 6.257M12 12.75a.75.75 0 1 1 0-1.5.75.75 0 0 1 0 1.5Z" />
@@ -260,12 +340,20 @@ export default async function SpecialistManagementPage({
                       {String(specialist.standardStartHour).padStart(2, "0")}:00-
                       {String(specialist.standardEndHour).padStart(2, "0")}:00
                     </td>
-                    <td className={`px-3 py-2 ${calCellClass}`}>{specialist.calUserId}</td>
+                    <td className={`px-3 py-2 ${calCellClass}`}>{specialist.calUserId || "-"}</td>
+                    <td className={`px-3 py-2 ${bookingsCellClass}`}>
+                      {specialist.microsoftBookingsStaffId || "-"}
+                    </td>
                     <td className="px-3 py-2">{specialist.supportsCouples ? "Yes" : "No"}</td>
                     <td className={`px-3 py-2 ${calCellClass}`}>
-                      IND: {specialist.calIndividualEventTypeId}
+                      IND: {specialist.calIndividualEventTypeId || "-"}
                       <br />
                       CPL: {specialist.calCouplesEventTypeId || "-"}
+                    </td>
+                    <td className={`px-3 py-2 ${bookingsCellClass}`}>
+                      IND: {specialist.microsoftBookingsIndividualServiceId || "-"}
+                      <br />
+                      CPL: {specialist.microsoftBookingsCouplesServiceId || "-"}
                     </td>
                     <td className="px-3 py-2">{specialist.capabilities.join(", ") || "-"}</td>
                     <td className="px-3 py-2">

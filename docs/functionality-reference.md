@@ -57,7 +57,7 @@ Supported engine types:
 
 - `manual` (MVP deterministic provider)
 - `calcom` (adapter placeholder)
-- `microsoft_bookings` (adapter placeholder)
+- `microsoft_bookings` (Microsoft Graph Bookings integration)
 
 ### Assignment modes
 
@@ -118,4 +118,3 @@ All critical operations create audit entries, including:
 - Manual overrides
 - Form/PIN actions
 - Provider event state changes
-
