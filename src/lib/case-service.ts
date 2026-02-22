@@ -4515,6 +4515,124 @@ export async function listDocumentTemplates() {
   });
 }
 
+export type WorkflowPresetKind = "INDIVIDUAL" | "COUPLES";
+
+type WorkflowPresetStepInput = {
+  name: string;
+  type: "FORM" | "REVIEW" | "SYSTEM";
+  stepCode: WorkflowStepCode;
+  formType?: string;
+  required: boolean;
+  requiresAllParticipants: boolean;
+  blocksScheduling: boolean;
+  sortOrder: number;
+};
+
+type WorkflowPresetDefinition = {
+  defaultCode: string;
+  defaultName: string;
+  counsellingType: string;
+  description: string;
+  steps: WorkflowPresetStepInput[];
+};
+
+const WORKFLOW_PRESET_DEFINITIONS: Record<WorkflowPresetKind, WorkflowPresetDefinition> = {
+  INDIVIDUAL: {
+    defaultCode: "INDIVIDUAL_COUNSELLING",
+    defaultName: "Individual Counselling",
+    counsellingType: "individual",
+    description: "Recommended baseline workflow for one-to-one counselling.",
+    steps: [
+      {
+        name: "Intake form",
+        type: "FORM",
+        stepCode: WorkflowStepCode.INTAKE_FORM,
+        formType: "INTAKE_FORM",
+        required: true,
+        requiresAllParticipants: false,
+        blocksScheduling: true,
+        sortOrder: 10,
+      },
+      {
+        name: "Availability captured from intake",
+        type: "SYSTEM",
+        stepCode: WorkflowStepCode.AVAILABILITY_CAPTURED,
+        required: true,
+        requiresAllParticipants: false,
+        blocksScheduling: true,
+        sortOrder: 20,
+      },
+      {
+        name: "Terms & conditions",
+        type: "FORM",
+        stepCode: WorkflowStepCode.TERMS_AND_CONDITIONS,
+        formType: "TERMS_AND_CONDITIONS",
+        required: true,
+        requiresAllParticipants: false,
+        blocksScheduling: false,
+        sortOrder: 30,
+      },
+    ],
+  },
+  COUPLES: {
+    defaultCode: "COUPLES_COUNSELLING",
+    defaultName: "Couples Counselling",
+    counsellingType: "couples",
+    description: "Recommended workflow where both participants complete required form steps.",
+    steps: [
+      {
+        name: "Intake form",
+        type: "FORM",
+        stepCode: WorkflowStepCode.INTAKE_FORM,
+        formType: "INTAKE_FORM",
+        required: true,
+        requiresAllParticipants: true,
+        blocksScheduling: true,
+        sortOrder: 10,
+      },
+      {
+        name: "Consent form",
+        type: "FORM",
+        stepCode: WorkflowStepCode.CONSENT_FORM,
+        formType: "CONSENT_FORM",
+        required: true,
+        requiresAllParticipants: true,
+        blocksScheduling: true,
+        sortOrder: 20,
+      },
+      {
+        name: "Agreement form",
+        type: "FORM",
+        stepCode: WorkflowStepCode.AGREEMENT_FORM,
+        formType: "AGREEMENT_FORM",
+        required: true,
+        requiresAllParticipants: true,
+        blocksScheduling: true,
+        sortOrder: 30,
+      },
+      {
+        name: "Availability captured from intake",
+        type: "SYSTEM",
+        stepCode: WorkflowStepCode.AVAILABILITY_CAPTURED,
+        required: true,
+        requiresAllParticipants: true,
+        blocksScheduling: true,
+        sortOrder: 40,
+      },
+      {
+        name: "Terms & conditions",
+        type: "FORM",
+        stepCode: WorkflowStepCode.TERMS_AND_CONDITIONS,
+        formType: "TERMS_AND_CONDITIONS",
+        required: true,
+        requiresAllParticipants: true,
+        blocksScheduling: false,
+        sortOrder: 50,
+      },
+    ],
+  },
+};
+
 export async function createWorkflowTemplate(input: {
   code: string;
   name: string;
@@ -4559,6 +4677,96 @@ export async function createWorkflowTemplate(input: {
       details: {
         caseWorkflowTemplateId: created.id,
         code: created.code,
+      },
+    });
+
+    return created;
+  });
+}
+
+export async function createWorkflowTemplateFromPreset(input: {
+  preset: WorkflowPresetKind;
+  code?: string;
+  name?: string;
+  description?: string;
+  isDefault?: boolean;
+  actorUserId: string;
+}) {
+  const preset = WORKFLOW_PRESET_DEFINITIONS[input.preset];
+  if (!preset) {
+    throw new DomainError("Invalid workflow preset.", 400);
+  }
+
+  const code = (input.code?.trim() || preset.defaultCode).toUpperCase();
+  const name = input.name?.trim() || preset.defaultName;
+  const counsellingType = preset.counsellingType;
+  const description = input.description?.trim() || preset.description;
+
+  if (!code || !name || !counsellingType) {
+    throw new DomainError("Workflow code, name, and counselling type are required.", 409);
+  }
+
+  return db.$transaction(async (tx) => {
+    const existing = await tx.caseWorkflowTemplate.findUnique({
+      where: {
+        code,
+      },
+      select: {
+        id: true,
+      },
+    });
+    if (existing) {
+      throw new DomainError(
+        `Workflow code '${code}' already exists. Use a different code for a new preset template.`,
+        409,
+      );
+    }
+
+    if (input.isDefault) {
+      await tx.caseWorkflowTemplate.updateMany({
+        where: {
+          isDefault: true,
+        },
+        data: {
+          isDefault: false,
+        },
+      });
+    }
+
+    const created = await tx.caseWorkflowTemplate.create({
+      data: {
+        code,
+        name,
+        counsellingType,
+        description,
+        isDefault: Boolean(input.isDefault),
+        active: true,
+      },
+    });
+
+    await tx.caseWorkflowStep.createMany({
+      data: preset.steps.map((step) => ({
+        templateId: created.id,
+        name: step.name,
+        formType: step.type === "FORM" ? step.formType || null : null,
+        stepCode: step.stepCode,
+        type: step.type,
+        required: step.required,
+        requiresAllParticipants: step.requiresAllParticipants,
+        blocksScheduling: step.blocksScheduling,
+        sortOrder: step.sortOrder,
+      })),
+    });
+
+    await createAuditLog(tx, {
+      userId: input.actorUserId,
+      action: "WORKFLOW_TEMPLATE_CREATED",
+      details: {
+        caseWorkflowTemplateId: created.id,
+        code: created.code,
+        source: "preset",
+        preset: input.preset,
+        stepCount: preset.steps.length,
       },
     });
 

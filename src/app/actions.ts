@@ -11,6 +11,7 @@ import {
   canUserOverride,
   completeDocumentInstance,
   createWorkflowTemplate,
+  createWorkflowTemplateFromPreset,
   createCaseFromIntake,
   createSpecialist,
   domainErrorMessage,
@@ -1016,6 +1017,40 @@ export async function createWorkflowTemplateAction(formData: FormData) {
       code,
       name,
       counsellingType,
+      description: description || undefined,
+      isDefault,
+      actorUserId: user.id,
+    });
+
+    revalidatePath("/admin/workflows");
+    revalidatePath("/admin/cases");
+    redirect(redirectTo);
+  } catch (error) {
+    redirectWithActionError(redirectTo, error);
+  }
+}
+
+const workflowPresetSchema = z.enum(["INDIVIDUAL", "COUPLES"]);
+
+export async function createWorkflowPresetAction(formData: FormData) {
+  const user = await requirePageUser([UserRole.OPS]);
+  const presetRaw = String(formData.get("preset") || "").trim().toUpperCase();
+  const code = String(formData.get("code") || "").trim();
+  const name = String(formData.get("name") || "").trim();
+  const description = String(formData.get("description") || "").trim();
+  const isDefault = String(formData.get("isDefault") || "") === "on";
+  const redirectTo = String(formData.get("redirectTo") || "/admin/workflows");
+
+  const presetParsed = workflowPresetSchema.safeParse(presetRaw);
+  if (!presetParsed.success) {
+    redirect(encodeErrorPath(redirectTo, "Invalid preset selection."));
+  }
+
+  try {
+    await createWorkflowTemplateFromPreset({
+      preset: presetParsed.data,
+      code: code || undefined,
+      name: name || undefined,
       description: description || undefined,
       isDefault,
       actorUserId: user.id,
