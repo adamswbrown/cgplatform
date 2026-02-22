@@ -2751,6 +2751,12 @@ export async function getCaseDetails(caseId: string) {
         },
         take: 25,
       },
+      emailLogs: {
+        orderBy: {
+          sentAt: "desc",
+        },
+        take: 50,
+      },
       auditLogs: {
         include: {
           user: {

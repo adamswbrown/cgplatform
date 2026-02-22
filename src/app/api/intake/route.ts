@@ -1,4 +1,4 @@
-import { CaseStatus } from "@prisma/client";
+import { CaseStatus, EmailStatus, EmailType } from "@prisma/client";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import {
@@ -18,7 +18,7 @@ import {
   type NewIntakeApiPayload,
 } from "@/lib/intake-form";
 import { getIntakeFormContent } from "@/lib/intake-settings";
-import { sendIntakeConfirmationEmail } from "@/lib/mailer";
+import { logEmail, sendIntakeConfirmationEmail } from "@/lib/mailer";
 import { getSchedulingAssignmentMode } from "@/lib/scheduling/config";
 
 function extractIpAddress(request: Request) {
@@ -183,17 +183,37 @@ async function handleModernPayload(request: Request, payload: NewIntakeApiPayloa
   const content = await getIntakeFormContent();
   const crisisSummary = summarizeCrisisContacts(content);
   try {
-    await sendIntakeConfirmationEmail({
+    const primaryEmail = await sendIntakeConfirmationEmail({
       to: payload.primary.email,
       caseReference: intakeResult.reference,
       crisisSummary,
     });
+    await logEmail({
+      caseId: intakeResult.caseId,
+      emailType: EmailType.INTAKE_CONFIRMATION,
+      recipientEmail: payload.primary.email,
+      recipientName: `${payload.primary.firstName} ${payload.primary.lastName}`,
+      subject: primaryEmail.subject,
+      status: primaryEmail.delivered ? EmailStatus.SENT : EmailStatus.FAILED,
+      providerMessageId: primaryEmail.providerMessageId,
+    });
 
     if (payload.participantType === "couple" && payload.secondary.email) {
-      await sendIntakeConfirmationEmail({
+      const secondaryEmail = await sendIntakeConfirmationEmail({
         to: payload.secondary.email,
         caseReference: intakeResult.reference,
         crisisSummary,
+      });
+      await logEmail({
+        caseId: intakeResult.caseId,
+        emailType: EmailType.INTAKE_CONFIRMATION,
+        recipientEmail: payload.secondary.email,
+        recipientName: payload.secondary.firstName && payload.secondary.lastName
+          ? `${payload.secondary.firstName} ${payload.secondary.lastName}`
+          : undefined,
+        subject: secondaryEmail.subject,
+        status: secondaryEmail.delivered ? EmailStatus.SENT : EmailStatus.FAILED,
+        providerMessageId: secondaryEmail.providerMessageId,
       });
     }
   } catch (error) {

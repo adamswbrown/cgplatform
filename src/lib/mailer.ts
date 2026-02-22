@@ -1,3 +1,6 @@
+import { EmailStatus, EmailType } from "@prisma/client";
+import { db } from "@/lib/db";
+
 type ConfirmationEmailInput = {
   to: string;
   caseReference: string;
@@ -88,15 +91,57 @@ function buildIntakeAccessInviteHtml(input: IntakeAccessInviteEmailInput) {
   `;
 }
 
-export async function sendIntakeConfirmationEmail(input: ConfirmationEmailInput) {
+export type EmailSendResult = {
+  delivered: boolean;
+  provider: "resend" | "none";
+  providerMessageId?: string;
+  subject: string;
+};
+
+export type LogEmailInput = {
+  caseId?: string;
+  clientId?: string;
+  emailType: EmailType;
+  recipientEmail: string;
+  recipientName?: string;
+  subject: string;
+  status: EmailStatus;
+  relatedFormType?: string;
+  relatedFormAccessPinId?: string;
+  relatedIntakeInviteId?: string;
+  providerMessageId?: string;
+  error?: string;
+};
+
+export async function logEmail(input: LogEmailInput) {
+  return db.emailLog.create({
+    data: {
+      caseId: input.caseId,
+      clientId: input.clientId,
+      emailType: input.emailType,
+      recipientEmail: input.recipientEmail,
+      recipientName: input.recipientName,
+      subject: input.subject,
+      status: input.status,
+      relatedFormType: input.relatedFormType,
+      relatedFormAccessPinId: input.relatedFormAccessPinId,
+      relatedIntakeInviteId: input.relatedIntakeInviteId,
+      providerMessageId: input.providerMessageId,
+      error: input.error,
+    },
+  });
+}
+
+export async function sendIntakeConfirmationEmail(input: ConfirmationEmailInput): Promise<EmailSendResult> {
   const fromAddress = process.env.CONFIRMATION_EMAIL_FROM || "no-reply@localhost";
   const resendApiKey = process.env.RESEND_API_KEY;
+  const subject = "Your counselling application has been received";
 
   if (!resendApiKey) {
     console.info(
       `[mailer] Confirmation email not sent. RESEND_API_KEY is not configured. target=${input.to}`,
     );
-    return { delivered: false, provider: "none" as const };
+    return { delivered: false, provider: "none" as const, subject };
   }
 
   const response = await fetch("https://api.resend.com/emails", {
@@ -108,7 +153,7 @@ export async function sendIntakeConfirmationEmail(input: ConfirmationEmailInput)
     body: JSON.stringify({
       from: fromAddress,
       to: [input.to],
-      subject: "Your counselling application has been received",
+      subject,
       html: buildHtml(input),
     }),
   });
@@ -118,16 +163,20 @@ export async function sendIntakeConfirmationEmail(input: ConfirmationEmailInput)
     throw new Error(`Confirmation email failed (${response.status}): ${body}`);
   }
 
-  return { delivered: true, provider: "resend" as const };
+  const resBody = await response.json().catch(() => null);
+  const providerMessageId = resBody?.id ? String(resBody.id) : undefined;
+
+  return { delivered: true, provider: "resend" as const, providerMessageId, subject };
 }
 
-export async function sendFormPinEmail(input: FormPinEmailInput) {
+export async function sendFormPinEmail(input: FormPinEmailInput): Promise<EmailSendResult> {
   const fromAddress = process.env.CONFIRMATION_EMAIL_FROM || "no-reply@localhost";
   const resendApiKey = process.env.RESEND_API_KEY;
+  const subject = "Your counselling form access PIN";
 
   if (!resendApiKey) {
     console.info(`[mailer] Form PIN email not sent. RESEND_API_KEY is not configured. target=${input.to}`);
-    return { delivered: false, provider: "none" as const };
+    return { delivered: false, provider: "none" as const, subject };
   }
 
   const response = await fetch("https://api.resend.com/emails", {
@@ -139,7 +188,7 @@ export async function sendFormPinEmail(input: FormPinEmailInput) {
     body: JSON.stringify({
       from: fromAddress,
       to: [input.to],
-      subject: "Your counselling form access PIN",
+      subject,
       html: buildFormPinHtml(input),
     }),
   });
@@ -149,18 +198,22 @@ export async function sendFormPinEmail(input: FormPinEmailInput) {
     throw new Error(`Form PIN email failed (${response.status}): ${body}`);
   }
 
-  return { delivered: true, provider: "resend" as const };
+  const resBody = await response.json().catch(() => null);
+  const providerMessageId = resBody?.id ? String(resBody.id) : undefined;
+
+  return { delivered: true, provider: "resend" as const, providerMessageId, subject };
 }
 
-export async function sendIntakeAccessInviteEmail(input: IntakeAccessInviteEmailInput) {
+export async function sendIntakeAccessInviteEmail(input: IntakeAccessInviteEmailInput): Promise<EmailSendResult> {
   const fromAddress = process.env.CONFIRMATION_EMAIL_FROM || "no-reply@localhost";
   const resendApiKey = process.env.RESEND_API_KEY;
+  const subject = "Your secure counselling intake form link";
 
   if (!resendApiKey) {
     console.info(
       `[mailer] Intake access invite email not sent. RESEND_API_KEY is not configured. target=${input.to}`,
     );
-    return { delivered: false, provider: "none" as const };
+    return { delivered: false, provider: "none" as const, subject };
   }
 
   const response = await fetch("https://api.resend.com/emails", {
@@ -172,7 +225,7 @@ export async function sendIntakeAccessInviteEmail(input: IntakeAccessInviteEmail
     body: JSON.stringify({
       from: fromAddress,
       to: [input.to],
-      subject: "Your secure counselling intake form link",
+      subject,
       html: buildIntakeAccessInviteHtml(input),
     }),
   });
@@ -182,5 +235,8 @@ export async function sendIntakeAccessInviteEmail(input: IntakeAccessInviteEmail
     throw new Error(`Intake access invite email failed (${response.status}): ${body}`);
   }
 
-  return { delivered: true, provider: "resend" as const };
+  const resBody = await response.json().catch(() => null);
+  const providerMessageId = resBody?.id ? String(resBody.id) : undefined;
+
+  return { delivered: true, provider: "resend" as const, providerMessageId, subject };
 }
