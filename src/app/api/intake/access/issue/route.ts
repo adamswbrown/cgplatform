@@ -1,10 +1,10 @@
 import { NextResponse } from "next/server";
-import { UserRole } from "@prisma/client";
+import { EmailStatus, EmailType, UserRole } from "@prisma/client";
 import { z } from "zod";
 import { requireApiUser } from "@/lib/auth";
 import { domainErrorMessage, isDomainError } from "@/lib/case-service";
 import { issueIntakeAccessInvite } from "@/lib/form-access";
-import { sendIntakeAccessInviteEmail } from "@/lib/mailer";
+import { logEmail, sendIntakeAccessInviteEmail } from "@/lib/mailer";
 
 const issueSchema = z
   .object({
@@ -47,8 +47,26 @@ export async function POST(request: Request) {
           expiresAt: issued.expiresAt,
         });
         emailDelivered = result.delivered;
+        await logEmail({
+          emailType: EmailType.INTAKE_ACCESS_INVITE,
+          recipientEmail: issued.recipientEmail,
+          recipientName: issued.recipientName || undefined,
+          subject: result.subject,
+          status: result.delivered ? EmailStatus.SENT : EmailStatus.FAILED,
+          relatedIntakeInviteId: issued.inviteId,
+          providerMessageId: result.providerMessageId,
+        });
       } catch (error) {
         emailError = domainErrorMessage(error);
+        await logEmail({
+          emailType: EmailType.INTAKE_ACCESS_INVITE,
+          recipientEmail: issued.recipientEmail,
+          recipientName: issued.recipientName || undefined,
+          subject: "Your secure counselling intake form link",
+          status: EmailStatus.FAILED,
+          relatedIntakeInviteId: issued.inviteId,
+          error: emailError,
+        });
       }
     }
 

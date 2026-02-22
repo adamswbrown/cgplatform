@@ -68,17 +68,18 @@ type IntakeProfileSnapshot = {
   riskSignals: string[];
 };
 
-type CasePanel = "assignment" | "intake" | "forms" | "history";
+type CasePanel = "assignment" | "intake" | "forms" | "emails" | "history";
 
 const CASE_PANELS: Array<{ id: CasePanel; label: string }> = [
   { id: "intake", label: "Intake" },
   { id: "assignment", label: "Assignment" },
   { id: "forms", label: "Forms & PINs" },
+  { id: "emails", label: "Emails" },
   { id: "history", label: "History" },
 ];
 
 function normalizeCasePanel(value: string | undefined): CasePanel {
-  if (value === "assignment" || value === "intake" || value === "forms" || value === "history") {
+  if (value === "assignment" || value === "intake" || value === "forms" || value === "emails" || value === "history") {
     return value;
   }
   return "intake";
@@ -1616,6 +1617,90 @@ export default async function CaseDetailPage({ params, searchParams }: CaseDetai
               )}
             </div>
           </div>
+        </section>
+      ) : null}
+
+      {activePanel === "emails" ? (
+        <section className="mt-4 rounded-2xl border border-[color:var(--border)] bg-[color:var(--surface)] p-5 shadow-sm">
+          <h3 className="text-lg font-semibold">Email Tracking</h3>
+          <p className="mt-1 text-xs text-[color:var(--muted)]">
+            All emails sent for this case and whether the client has responded by filling out the form.
+          </p>
+          {caseItem.emailLogs.length === 0 ? (
+            <p className="mt-4 text-sm text-[color:var(--muted)]">No emails have been sent for this case yet.</p>
+          ) : (
+            <ul className="mt-4 space-y-3">
+              {caseItem.emailLogs.map((email) => {
+                const isFailed = email.status === "FAILED";
+                const hasResponded = !!email.respondedAt;
+                const borderClass = isFailed
+                  ? "border-red-200"
+                  : hasResponded
+                    ? "border-emerald-200"
+                    : "border-[color:var(--border)]";
+                const bgClass = isFailed
+                  ? "bg-red-50"
+                  : hasResponded
+                    ? "bg-emerald-50"
+                    : "bg-white";
+
+                return (
+                  <li
+                    key={email.id}
+                    className={`rounded-xl border ${borderClass} ${bgClass} p-4`}
+                  >
+                    <div className="flex flex-wrap items-start justify-between gap-3">
+                      <div>
+                        <p className="font-medium text-sm">
+                          {email.recipientName ? `${email.recipientName} ` : ""}
+                          <span className="text-[color:var(--muted)]">({email.recipientEmail})</span>
+                        </p>
+                        <p className="mt-1 text-xs text-[color:var(--muted)]">
+                          {email.subject}
+                        </p>
+                        <div className="mt-2 flex flex-wrap gap-2">
+                          <span className="rounded-full border border-[color:var(--border)] bg-[color:var(--accent-soft)] px-2.5 py-0.5 text-[11px] font-semibold uppercase tracking-wide">
+                            {formatStatus(email.emailType)}
+                          </span>
+                          {email.relatedFormType ? (
+                            <span className="rounded-full border border-[color:var(--border)] bg-white px-2.5 py-0.5 text-[11px] font-semibold uppercase tracking-wide">
+                              {email.relatedFormType}
+                            </span>
+                          ) : null}
+                        </div>
+                      </div>
+                      <div className="text-right">
+                        {isFailed ? (
+                          <span className="inline-flex items-center rounded-full border border-red-300 bg-red-100 px-3 py-1 text-xs font-semibold text-red-800">
+                            Failed
+                          </span>
+                        ) : hasResponded ? (
+                          <span className="inline-flex items-center rounded-full border border-emerald-300 bg-emerald-100 px-3 py-1 text-xs font-semibold text-emerald-800">
+                            Responded
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center rounded-full border border-amber-300 bg-amber-100 px-3 py-1 text-xs font-semibold text-amber-800">
+                            Awaiting response
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                    <div className="mt-2 flex flex-wrap gap-4 text-xs text-[color:var(--muted)]">
+                      <span>Sent: {formatDateTime(email.sentAt)}</span>
+                      {hasResponded ? (
+                        <span className="text-emerald-700">
+                          Responded: {formatDateTime(email.respondedAt!)}
+                        </span>
+                      ) : null}
+                      {email.error ? (
+                        <span className="text-red-600">Error: {email.error}</span>
+                      ) : null}
+                    </div>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
         </section>
       ) : null}
 
