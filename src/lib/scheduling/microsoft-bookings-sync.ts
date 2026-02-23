@@ -1,5 +1,6 @@
 import { SessionStatus } from "@prisma/client";
 import { db } from "@/lib/db";
+import { getIntegrationSettings } from "@/lib/integration-settings";
 import { MicrosoftBookingsClient } from "@/lib/integrations/microsoft-bookings/client";
 import { handleProviderBookingEvent } from "@/lib/scheduling/events";
 
@@ -53,15 +54,16 @@ function normalizePositiveInteger(value: unknown, fallback: number, min: number,
   return rounded;
 }
 
-function resolveBusinessId(specialistBusinessId: string | null) {
+function resolveBusinessId(specialistBusinessId: string | null, globalBusinessId?: string) {
   const specialistValue = specialistBusinessId?.trim();
   if (specialistValue) {
     return specialistValue;
   }
 
-  const globalValue = String(process.env.MICROSOFT_BOOKINGS_BUSINESS_ID || "").trim();
-  if (globalValue) {
-    return globalValue;
+  const resolvedGlobal = globalBusinessId?.trim() ||
+    String(process.env.MICROSOFT_BOOKINGS_BUSINESS_ID || "").trim();
+  if (resolvedGlobal) {
+    return resolvedGlobal;
   }
 
   return null;
@@ -71,16 +73,16 @@ function sameTime(first: Date, second: Date) {
   return first.getTime() === second.getTime();
 }
 
-function buildRange() {
+function buildRange(configuredLookbackHours?: number, configuredLookaheadDays?: number) {
   const now = new Date();
   const lookbackHours = normalizePositiveInteger(
-    process.env.MICROSOFT_BOOKINGS_SYNC_LOOKBACK_HOURS,
+    configuredLookbackHours,
     DEFAULT_SYNC_LOOKBACK_HOURS,
     1,
     24 * 14,
   );
   const lookaheadDays = normalizePositiveInteger(
-    process.env.MICROSOFT_BOOKINGS_SYNC_LOOKAHEAD_DAYS,
+    configuredLookaheadDays,
     DEFAULT_SYNC_LOOKAHEAD_DAYS,
     1,
     365,
@@ -98,12 +100,12 @@ function buildRange() {
   };
 }
 
-function groupSessionsByBusiness(sessions: SessionForSync[]) {
+function groupSessionsByBusiness(sessions: SessionForSync[], globalBusinessId?: string) {
   const sessionsByBusiness = new Map<string, SessionForSync[]>();
   let unavailableBusinessMappings = 0;
 
   for (const session of sessions) {
-    const businessId = resolveBusinessId(session.specialist.microsoftBookingsBusinessId);
+    const businessId = resolveBusinessId(session.specialist.microsoftBookingsBusinessId, globalBusinessId);
     if (!businessId) {
       unavailableBusinessMappings += 1;
       continue;
@@ -121,12 +123,16 @@ function groupSessionsByBusiness(sessions: SessionForSync[]) {
 }
 
 export async function syncMicrosoftBookingsAppointments(): Promise<MicrosoftBookingsSyncResult> {
-  const { rangeStart, rangeEnd } = buildRange();
+  const integrationSettings = await getIntegrationSettings();
+  const { rangeStart, rangeEnd } = buildRange(
+    integrationSettings.microsoftBookingsSyncLookbackHours,
+    integrationSettings.microsoftBookingsSyncLookaheadDays,
+  );
   const limit = normalizePositiveInteger(
-    process.env.MICROSOFT_BOOKINGS_SYNC_FETCH_LIMIT,
+    integrationSettings.microsoftBookingsSyncFetchLimit,
     DEFAULT_APPOINTMENT_FETCH_LIMIT,
     1,
-    500,
+    2000,
   );
 
   const sessions = (await db.session.findMany({
@@ -156,7 +162,10 @@ export async function syncMicrosoftBookingsAppointments(): Promise<MicrosoftBook
     },
   })) as SessionForSync[];
 
-  const { sessionsByBusiness, unavailableBusinessMappings } = groupSessionsByBusiness(sessions);
+  const { sessionsByBusiness, unavailableBusinessMappings } = groupSessionsByBusiness(
+    sessions,
+    integrationSettings.microsoftBookingsBusinessId,
+  );
   const client = new MicrosoftBookingsClient();
 
   let missingRemoteAppointments = 0;

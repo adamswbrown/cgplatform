@@ -1,5 +1,6 @@
 import { SessionStatus } from "@prisma/client";
 import { getOperationalSettings } from "@/lib/admin-settings";
+import { getIntegrationSettings } from "@/lib/integration-settings";
 import { MicrosoftBookingsClient } from "@/lib/integrations/microsoft-bookings/client";
 import { sendProviderEventWebhook } from "@/lib/scheduling/provider-events-client";
 import type {
@@ -94,19 +95,23 @@ function resolveAvailableStatus(status: string) {
   return normalized === "available" || normalized === "free";
 }
 
-function resolveBookingsBusinessId(specialist: SpecialistBookingsConfig) {
+function resolveBookingsBusinessId(
+  specialist: SpecialistBookingsConfig,
+  globalBusinessId?: string,
+) {
   const specialistBusinessId = specialist.microsoftBookingsBusinessId?.trim();
   if (specialistBusinessId) {
     return specialistBusinessId;
   }
 
-  const globalBusinessId = String(process.env.MICROSOFT_BOOKINGS_BUSINESS_ID || "").trim();
-  if (globalBusinessId) {
-    return globalBusinessId;
+  const resolvedGlobal = globalBusinessId?.trim() ||
+    String(process.env.MICROSOFT_BOOKINGS_BUSINESS_ID || "").trim();
+  if (resolvedGlobal) {
+    return resolvedGlobal;
   }
 
   throw new Error(
-    `No Microsoft Bookings business id configured for counsellor ${specialist.name}. Set microsoftBookingsBusinessId on the counsellor or MICROSOFT_BOOKINGS_BUSINESS_ID.`,
+    `No Microsoft Bookings business id configured for counsellor ${specialist.name}. Set microsoftBookingsBusinessId on the counsellor or configure it in Integration Settings.`,
   );
 }
 
@@ -145,8 +150,10 @@ function resolveBookingsServiceId(
   return individualServiceId;
 }
 
-function resolveBookingsTimeZone() {
-  return String(process.env.MICROSOFT_BOOKINGS_DEFAULT_TIME_ZONE || DEFAULT_BOOKINGS_TIME_ZONE).trim();
+function resolveBookingsTimeZone(configuredTimeZone?: string) {
+  const resolved = configuredTimeZone?.trim() ||
+    String(process.env.MICROSOFT_BOOKINGS_DEFAULT_TIME_ZONE || DEFAULT_BOOKINGS_TIME_ZONE).trim();
+  return resolved;
 }
 
 export class MicrosoftBookingsSchedulingProvider implements SchedulingProvider {
@@ -244,18 +251,19 @@ export class MicrosoftBookingsSchedulingProvider implements SchedulingProvider {
     durationMinutes: number,
   ): Promise<Date[]> {
     const normalizedDuration = normalizeDuration(durationMinutes);
-    const [operationalSettings, specialist] = await Promise.all([
+    const [operationalSettings, integrationSettings, specialist] = await Promise.all([
       getOperationalSettings(),
+      getIntegrationSettings(),
       this.getSpecialistConfig(specialistId),
     ]);
 
-    const businessId = resolveBookingsBusinessId(specialist);
+    const businessId = resolveBookingsBusinessId(specialist, integrationSettings.microsoftBookingsBusinessId);
     const staffId = resolveBookingsStaffId(specialist);
     void resolveBookingsServiceId(specialist, eventType);
 
     const now = new Date();
     const horizonDays = normalizePositiveInteger(
-      process.env.MICROSOFT_BOOKINGS_AVAILABILITY_HORIZON_DAYS,
+      integrationSettings.microsoftBookingsAvailabilityHorizonDays,
       operationalSettings.manualProviderHorizonDays || DEFAULT_AVAILABILITY_HORIZON_DAYS,
       {
         min: 1,
@@ -264,14 +272,14 @@ export class MicrosoftBookingsSchedulingProvider implements SchedulingProvider {
     );
     const endReference = addDays(now, horizonDays);
     const slotIncrementMinutes = normalizePositiveInteger(
-      process.env.MICROSOFT_BOOKINGS_SLOT_INCREMENT_MINUTES,
+      integrationSettings.microsoftBookingsSlotIncrementMinutes,
       operationalSettings.manualProviderSlotIncrementMinutes || DEFAULT_SLOT_INCREMENT_MINUTES,
       {
         min: 5,
         max: 60,
       },
     );
-    const timeZone = resolveBookingsTimeZone();
+    const timeZone = resolveBookingsTimeZone(integrationSettings.microsoftBookingsDefaultTimeZone);
 
     const availability = await this.client.getStaffAvailability({
       businessId,
@@ -315,12 +323,15 @@ export class MicrosoftBookingsSchedulingProvider implements SchedulingProvider {
       throw new Error("Selected slot is no longer available.");
     }
 
-    const specialist = await this.getSpecialistConfig(specialistId);
-    const businessId = resolveBookingsBusinessId(specialist);
+    const [integrationSettings, specialist] = await Promise.all([
+      getIntegrationSettings(),
+      this.getSpecialistConfig(specialistId),
+    ]);
+    const businessId = resolveBookingsBusinessId(specialist, integrationSettings.microsoftBookingsBusinessId);
     const staffId = resolveBookingsStaffId(specialist);
     const serviceId = resolveBookingsServiceId(specialist, caseData.eventType);
     const endTime = addMinutes(candidate, normalizedDuration);
-    const timeZone = resolveBookingsTimeZone();
+    const timeZone = resolveBookingsTimeZone(integrationSettings.microsoftBookingsDefaultTimeZone);
 
     const appointment = await this.client.createAppointment({
       businessId,
@@ -377,8 +388,11 @@ export class MicrosoftBookingsSchedulingProvider implements SchedulingProvider {
       return;
     }
 
-    const specialist = await this.getSpecialistConfig(session.specialistId);
-    const businessId = resolveBookingsBusinessId(specialist);
+    const [integrationSettings, specialist] = await Promise.all([
+      getIntegrationSettings(),
+      this.getSpecialistConfig(session.specialistId),
+    ]);
+    const businessId = resolveBookingsBusinessId(specialist, integrationSettings.microsoftBookingsBusinessId);
     await this.client.cancelAppointment({
       businessId,
       appointmentId: normalizedBookingId,

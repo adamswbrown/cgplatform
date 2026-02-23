@@ -51,6 +51,20 @@ export default async function AdminSettingsPage() {
             Open Intake Content Settings
           </Link>
         </article>
+
+        <article className="cg-surface-card p-5">
+          <h2 className="text-lg font-semibold">Integration Settings</h2>
+          <p className="mt-2 text-sm text-[color:var(--muted)]">
+            Configure Microsoft Bookings connection, sync parameters, and Resend email sender
+            address.
+          </p>
+          <Link
+            href="/admin/settings/integrations"
+            className="mt-4 inline-block rounded-md border border-[color:var(--border)] px-3 py-2 text-sm hover:bg-[color:var(--accent-soft)]"
+          >
+            Open Integration Settings
+          </Link>
+        </article>
       </section>
     </AuthenticatedShell>
   );

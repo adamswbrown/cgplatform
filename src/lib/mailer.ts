@@ -1,5 +1,6 @@
 import { EmailStatus, EmailType } from "@prisma/client";
 import { db } from "@/lib/db";
+import { getIntegrationSettings } from "@/lib/integration-settings";
 
 type ConfirmationEmailInput = {
   to: string;
@@ -133,7 +134,8 @@ export async function logEmail(input: LogEmailInput) {
 }
 
 export async function sendIntakeConfirmationEmail(input: ConfirmationEmailInput): Promise<EmailSendResult> {
-  const fromAddress = process.env.CONFIRMATION_EMAIL_FROM || "no-reply@localhost";
+  const integrationSettings = await getIntegrationSettings();
+  const fromAddress = integrationSettings.resendFromAddress;
   const resendApiKey = process.env.RESEND_API_KEY;
   const subject = "Your counselling application has been received";
 
@@ -170,7 +172,8 @@ export async function sendIntakeConfirmationEmail(input: ConfirmationEmailInput)
 }
 
 export async function sendFormPinEmail(input: FormPinEmailInput): Promise<EmailSendResult> {
-  const fromAddress = process.env.CONFIRMATION_EMAIL_FROM || "no-reply@localhost";
+  const integrationSettings = await getIntegrationSettings();
+  const fromAddress = integrationSettings.resendFromAddress;
   const resendApiKey = process.env.RESEND_API_KEY;
   const subject = "Your counselling form access PIN";
 
@@ -205,7 +208,8 @@ export async function sendFormPinEmail(input: FormPinEmailInput): Promise<EmailS
 }
 
 export async function sendIntakeAccessInviteEmail(input: IntakeAccessInviteEmailInput): Promise<EmailSendResult> {
-  const fromAddress = process.env.CONFIRMATION_EMAIL_FROM || "no-reply@localhost";
+  const integrationSettings = await getIntegrationSettings();
+  const fromAddress = integrationSettings.resendFromAddress;
   const resendApiKey = process.env.RESEND_API_KEY;
   const subject = "Your secure counselling intake form link";
 

@@ -36,6 +36,7 @@ import {
 } from "@/lib/admin-settings";
 import { issueFormPin, issueIntakeAccessInvite, revokeFormPin } from "@/lib/form-access";
 import { updateIntakeFormContent } from "@/lib/intake-settings";
+import { updateIntegrationSettings } from "@/lib/integration-settings";
 import { logEmail, sendFormPinEmail, sendIntakeAccessInviteEmail } from "@/lib/mailer";
 
 const intakeSchema = z
@@ -900,6 +901,64 @@ export async function updateOperationalSettingsAction(formData: FormData) {
   revalidatePath("/admin/cases");
   revalidatePath("/intake");
   redirect(appendQuery("/admin/settings/operations", "saved", "1"));
+}
+
+export async function updateIntegrationSettingsAction(formData: FormData) {
+  const user = await requirePageUser([UserRole.OPS]);
+  const redirectTo = String(formData.get("redirectTo") || "/admin/settings/integrations");
+
+  try {
+    await updateIntegrationSettings(
+      {
+        microsoftBookingsBusinessId: String(
+          formData.get("microsoftBookingsBusinessId") || "",
+        ).trim(),
+        microsoftBookingsDefaultTimeZone: String(
+          formData.get("microsoftBookingsDefaultTimeZone") || "UTC",
+        ).trim(),
+        microsoftBookingsAvailabilityHorizonDays: parseIntegerField(
+          formData,
+          "microsoftBookingsAvailabilityHorizonDays",
+          "Availability horizon days",
+          { min: 1, max: 120 },
+        ),
+        microsoftBookingsSlotIncrementMinutes: parseIntegerField(
+          formData,
+          "microsoftBookingsSlotIncrementMinutes",
+          "Slot increment minutes",
+          { min: 5, max: 60 },
+        ),
+        microsoftBookingsSyncLookbackHours: parseIntegerField(
+          formData,
+          "microsoftBookingsSyncLookbackHours",
+          "Sync lookback hours",
+          { min: 1, max: 168 },
+        ),
+        microsoftBookingsSyncLookaheadDays: parseIntegerField(
+          formData,
+          "microsoftBookingsSyncLookaheadDays",
+          "Sync lookahead days",
+          { min: 1, max: 90 },
+        ),
+        microsoftBookingsSyncFetchLimit: parseIntegerField(
+          formData,
+          "microsoftBookingsSyncFetchLimit",
+          "Sync fetch limit",
+          { min: 50, max: 2000 },
+        ),
+        resendFromAddress: String(
+          formData.get("resendFromAddress") || "",
+        ).trim(),
+      },
+      user.id,
+    );
+  } catch (error) {
+    redirectWithActionError(redirectTo, error);
+  }
+
+  revalidatePath("/admin/settings");
+  revalidatePath("/admin/settings/integrations");
+  redirect(appendQuery("/admin/settings/integrations", "saved", "1"));
 }
 
 export async function assignCaseWorkflowAction(formData: FormData) {
