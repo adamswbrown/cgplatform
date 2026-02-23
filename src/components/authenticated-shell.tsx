@@ -93,6 +93,7 @@ function defaultSettingsNavItems(role: UserRole): NavItem[] {
   return [
     { href: "/admin/settings/operations", label: "Operational Settings" },
     { href: "/admin/settings/intake", label: "Intake Settings" },
+    { href: "/admin/settings/integrations", label: "Integration Settings" },
     { href: "/admin/workflows", label: "Workflows" },
   ];
 }
