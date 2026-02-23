@@ -258,7 +258,7 @@ export function ManualAssignmentBoard({
 }: ManualAssignmentBoardProps) {
   const router = useRouter();
   const [queue, setQueue] = useState(cases);
-  const [viewMode, setViewMode] = useState<BoardViewMode>("kanban");
+  const [viewMode, setViewMode] = useState<BoardViewMode>("calendar");
   const [activeSpecialistId, setActiveSpecialistId] = useState<string>(
     specialists[0]?.id ?? "",
   );
@@ -765,20 +765,6 @@ export function ManualAssignmentBoard({
           <div className="flex items-center gap-1.5 rounded-lg border border-[color:var(--border)] bg-white p-0.5">
             <button
               type="button"
-              onClick={() => setViewMode("kanban")}
-              className={`flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
-                viewMode === "kanban"
-                  ? "bg-[color:var(--cg-ink)] text-white shadow-sm"
-                  : "text-[color:var(--muted)] hover:text-[color:var(--cg-ink)]"
-              }`}
-            >
-              <svg aria-hidden="true" viewBox="0 0 16 16" fill="currentColor" className="h-3.5 w-3.5">
-                <path d="M2.5 3A1.5 1.5 0 0 0 1 4.5v2A1.5 1.5 0 0 0 2.5 8h3A1.5 1.5 0 0 0 7 6.5v-2A1.5 1.5 0 0 0 5.5 3h-3ZM2.5 9.5A1.5 1.5 0 0 0 1 11v1.5A1.5 1.5 0 0 0 2.5 14h3A1.5 1.5 0 0 0 7 12.5V11A1.5 1.5 0 0 0 5.5 9.5h-3ZM9 4.5A1.5 1.5 0 0 1 10.5 3h3A1.5 1.5 0 0 1 15 4.5V11a1.5 1.5 0 0 1-1.5 1.5h-3A1.5 1.5 0 0 1 9 11V4.5Z" />
-              </svg>
-              Kanban
-            </button>
-            <button
-              type="button"
               onClick={() => setViewMode("calendar")}
               className={`flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
                 viewMode === "calendar"
@@ -790,6 +776,20 @@ export function ManualAssignmentBoard({
                 <path fillRule="evenodd" d="M4 1.75a.75.75 0 0 1 1.5 0V3h5V1.75a.75.75 0 0 1 1.5 0V3a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2V1.75ZM4.5 7a1 1 0 0 0-1 1v4.5a1 1 0 0 0 1 1h7a1 1 0 0 0 1-1V8a1 1 0 0 0-1-1h-7Z" clipRule="evenodd" />
               </svg>
               Calendar
+            </button>
+            <button
+              type="button"
+              onClick={() => setViewMode("kanban")}
+              className={`flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
+                viewMode === "kanban"
+                  ? "bg-[color:var(--cg-ink)] text-white shadow-sm"
+                  : "text-[color:var(--muted)] hover:text-[color:var(--cg-ink)]"
+              }`}
+            >
+              <svg aria-hidden="true" viewBox="0 0 16 16" fill="currentColor" className="h-3.5 w-3.5">
+                <path d="M2.5 3A1.5 1.5 0 0 0 1 4.5v2A1.5 1.5 0 0 0 2.5 8h3A1.5 1.5 0 0 0 7 6.5v-2A1.5 1.5 0 0 0 5.5 3h-3ZM2.5 9.5A1.5 1.5 0 0 0 1 11v1.5A1.5 1.5 0 0 0 2.5 14h3A1.5 1.5 0 0 0 7 12.5V11A1.5 1.5 0 0 0 5.5 9.5h-3ZM9 4.5A1.5 1.5 0 0 1 10.5 3h3A1.5 1.5 0 0 1 15 4.5V11a1.5 1.5 0 0 1-1.5 1.5h-3A1.5 1.5 0 0 1 9 11V4.5Z" />
+              </svg>
+              Kanban
             </button>
           </div>
           <div className="flex items-center gap-3 text-xs">
