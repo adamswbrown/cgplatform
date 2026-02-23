@@ -465,8 +465,15 @@ export function ManualAssignmentBoard({
       delete next[caseItem.id];
       return next;
     });
+    const unassignedCase: AssignmentCase = {
+      ...caseItem,
+      status:
+        caseItem.status === "SCHEDULED" || caseItem.status === "IN_SESSION"
+          ? "READY_TO_SCHEDULE"
+          : caseItem.status,
+    };
     setQueue((previous) =>
-      previous.some((entry) => entry.id === caseItem.id) ? previous : [caseItem, ...previous],
+      previous.some((entry) => entry.id === caseItem.id) ? previous : [unassignedCase, ...previous],
     );
     setNotice({
       type: "success",
