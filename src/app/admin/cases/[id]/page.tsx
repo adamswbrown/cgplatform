@@ -1702,25 +1702,107 @@ export default async function CaseDetailPage({ params, searchParams }: CaseDetai
         <section className="mt-4 rounded-2xl border border-[color:var(--border)] bg-[color:var(--surface)] p-5 shadow-sm">
           <h3 className="text-lg font-semibold">Email Tracking</h3>
           <p className="mt-1 text-xs text-[color:var(--muted)]">
-            All emails sent for this case and whether the client has responded by filling out the form.
+            Delivery status, open tracking, and client responses for all emails sent in this case.
           </p>
           {caseItem.emailLogs.length === 0 ? (
             <p className="mt-4 text-sm text-[color:var(--muted)]">No emails have been sent for this case yet.</p>
           ) : (
             <ul className="mt-4 space-y-3">
               {caseItem.emailLogs.map((email) => {
-                const isFailed = email.status === "FAILED";
+                const status = email.status;
                 const hasResponded = !!email.respondedAt;
-                const borderClass = isFailed
+                const isTerminalError = status === "FAILED" || status === "BOUNCED" || status === "COMPLAINED";
+
+                const borderClass = isTerminalError
                   ? "border-red-200"
                   : hasResponded
                     ? "border-emerald-200"
-                    : "border-[color:var(--border)]";
-                const bgClass = isFailed
+                    : status === "OPENED" || status === "CLICKED"
+                      ? "border-purple-200"
+                      : status === "DELIVERED"
+                        ? "border-blue-200"
+                        : "border-[color:var(--border)]";
+                const bgClass = isTerminalError
                   ? "bg-red-50"
                   : hasResponded
                     ? "bg-emerald-50"
-                    : "bg-white";
+                    : status === "OPENED" || status === "CLICKED"
+                      ? "bg-purple-50"
+                      : status === "DELIVERED"
+                        ? "bg-blue-50"
+                        : "bg-white";
+
+                const statusBadge = (() => {
+                  if (hasResponded) {
+                    return (
+                      <span className="inline-flex items-center rounded-full border border-emerald-300 bg-emerald-100 px-3 py-1 text-xs font-semibold text-emerald-800">
+                        Responded
+                      </span>
+                    );
+                  }
+                  switch (status) {
+                    case "CLICKED":
+                      return (
+                        <span className="inline-flex items-center rounded-full border border-indigo-300 bg-indigo-100 px-3 py-1 text-xs font-semibold text-indigo-800">
+                          Clicked
+                        </span>
+                      );
+                    case "OPENED":
+                      return (
+                        <span className="inline-flex items-center rounded-full border border-purple-300 bg-purple-100 px-3 py-1 text-xs font-semibold text-purple-800">
+                          Opened
+                        </span>
+                      );
+                    case "DELIVERED":
+                      return (
+                        <span className="inline-flex items-center rounded-full border border-blue-300 bg-blue-100 px-3 py-1 text-xs font-semibold text-blue-800">
+                          Delivered
+                        </span>
+                      );
+                    case "DELIVERY_DELAYED":
+                      return (
+                        <span className="inline-flex items-center rounded-full border border-amber-300 bg-amber-100 px-3 py-1 text-xs font-semibold text-amber-800">
+                          Delayed
+                        </span>
+                      );
+                    case "BOUNCED":
+                      return (
+                        <span className="inline-flex items-center rounded-full border border-red-300 bg-red-100 px-3 py-1 text-xs font-semibold text-red-800">
+                          Bounced
+                        </span>
+                      );
+                    case "COMPLAINED":
+                      return (
+                        <span className="inline-flex items-center rounded-full border border-red-300 bg-red-100 px-3 py-1 text-xs font-semibold text-red-800">
+                          Spam complaint
+                        </span>
+                      );
+                    case "FAILED":
+                      return (
+                        <span className="inline-flex items-center rounded-full border border-red-300 bg-red-100 px-3 py-1 text-xs font-semibold text-red-800">
+                          Failed
+                        </span>
+                      );
+                    default:
+                      return (
+                        <span className="inline-flex items-center rounded-full border border-amber-300 bg-amber-100 px-3 py-1 text-xs font-semibold text-amber-800">
+                          Sent
+                        </span>
+                      );
+                  }
+                })();
+
+                // Extract bounce reason from events if available
+                const bounceEvent = email.events?.find(
+                  (e: { eventType: string; rawPayload?: unknown }) => e.eventType === "bounced" && e.rawPayload,
+                );
+                const bounceReason =
+                  bounceEvent?.rawPayload &&
+                  typeof bounceEvent.rawPayload === "object" &&
+                  bounceEvent.rawPayload !== null &&
+                  "bounce" in bounceEvent.rawPayload
+                    ? (bounceEvent.rawPayload as { bounce?: { message?: string } }).bounce?.message
+                    : undefined;
 
                 return (
                   <li
@@ -1748,21 +1830,10 @@ export default async function CaseDetailPage({ params, searchParams }: CaseDetai
                         </div>
                       </div>
                       <div className="text-right">
-                        {isFailed ? (
-                          <span className="inline-flex items-center rounded-full border border-red-300 bg-red-100 px-3 py-1 text-xs font-semibold text-red-800">
-                            Failed
-                          </span>
-                        ) : hasResponded ? (
-                          <span className="inline-flex items-center rounded-full border border-emerald-300 bg-emerald-100 px-3 py-1 text-xs font-semibold text-emerald-800">
-                            Responded
-                          </span>
-                        ) : (
-                          <span className="inline-flex items-center rounded-full border border-amber-300 bg-amber-100 px-3 py-1 text-xs font-semibold text-amber-800">
-                            Awaiting response
-                          </span>
-                        )}
+                        {statusBadge}
                       </div>
                     </div>
+
                     <div className="mt-2 flex flex-wrap gap-4 text-xs text-[color:var(--muted)]">
                       <span>Sent: {formatDateTime(email.sentAt)}</span>
                       {hasResponded ? (
@@ -1773,7 +1844,54 @@ export default async function CaseDetailPage({ params, searchParams }: CaseDetai
                       {email.error ? (
                         <span className="text-red-600">Error: {email.error}</span>
                       ) : null}
+                      {bounceReason ? (
+                        <span className="text-red-600">Bounce: {bounceReason}</span>
+                      ) : null}
                     </div>
+
+                    {/* Event timeline */}
+                    {email.events && email.events.length > 0 ? (
+                      <details className="mt-3">
+                        <summary className="cursor-pointer text-xs font-medium text-[color:var(--muted)] hover:text-[color:var(--foreground)]">
+                          Event timeline ({email.events.length})
+                        </summary>
+                        <ol className="mt-2 space-y-1 border-l-2 border-[color:var(--border)] pl-3">
+                          {email.events.map((event: { id: string; eventType: string; occurredAt: Date; rawPayload?: unknown }) => {
+                            const eventLabel: Record<string, string> = {
+                              sent: "Sent to provider",
+                              delivered: "Delivered to inbox",
+                              delivery_delayed: "Delivery delayed",
+                              opened: "Opened by recipient",
+                              clicked: "Link clicked",
+                              bounced: "Bounced",
+                              complained: "Marked as spam",
+                              failed: "Send failed",
+                            };
+                            const clickUrl =
+                              event.eventType === "clicked" &&
+                              event.rawPayload &&
+                              typeof event.rawPayload === "object" &&
+                              event.rawPayload !== null &&
+                              "click" in event.rawPayload
+                                ? (event.rawPayload as { click?: { link?: string } }).click?.link
+                                : undefined;
+
+                            return (
+                              <li key={event.id} className="text-xs text-[color:var(--muted)]">
+                                <span className="font-medium text-[color:var(--foreground)]">
+                                  {eventLabel[event.eventType] ?? event.eventType}
+                                </span>
+                                {" — "}
+                                {formatDateTime(event.occurredAt)}
+                                {clickUrl ? (
+                                  <span className="ml-1 text-indigo-600 break-all">({clickUrl})</span>
+                                ) : null}
+                              </li>
+                            );
+                          })}
+                        </ol>
+                      </details>
+                    ) : null}
                   </li>
                 );
               })}

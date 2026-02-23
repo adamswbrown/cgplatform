@@ -80,7 +80,30 @@ Outcome:
 
 - Document completion and secure form access are both controlled in one place.
 
-## 7) Counsellor Management
+## 7) Email Tracking
+
+Route: `/admin/cases/:id?panel=emails`
+
+1. Open a case and switch to the **Emails** tab.
+2. Each email shows a colour-coded status badge:
+   - **Sent** (amber) — accepted by email provider, not yet confirmed delivered.
+   - **Delivered** (blue) — reached the recipient's mail server.
+   - **Opened** (purple) — recipient opened the email.
+   - **Clicked** (indigo) — recipient clicked a link in the email.
+   - **Delayed** (amber) — temporary delivery issue, provider is retrying.
+   - **Bounced** (red) — permanently rejected. Bounce reason shown if available.
+   - **Spam complaint** (red) — recipient marked as spam.
+   - **Failed** (red) — sending error. Error message shown.
+   - **Responded** (green) — client has submitted the form linked to the email.
+3. Click **Event timeline** on any email to expand a full chronological log of delivery events.
+
+Notes:
+
+- Open tracking relies on a tracking pixel. Some email clients (Outlook desktop, Apple Mail with privacy protection) block tracking pixels, so "Opened" is not guaranteed to appear even if the recipient read the email.
+- "Responded" is independent of delivery tracking — it means the client submitted the associated form, regardless of open/click status.
+- Statuses update automatically in real time via Resend webhooks. Refresh the page to see the latest state.
+
+## 8) Counsellor Management
 
 Routes:
 
@@ -95,7 +118,7 @@ Tasks:
 - Set standard working hours.
 - Manage availability and out-of-office windows.
 
-## 8) Workflow Administration
+## 9) Workflow Administration
 
 Route: `/admin/workflows`
 
@@ -104,7 +127,7 @@ Tasks:
 - Create/edit workflow templates.
 - Add/edit steps, required flags, blocking flags, and participant requirements.
 
-## 9) Operational Configuration
+## 10) Operational Configuration
 
 Routes:
 

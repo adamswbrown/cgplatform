@@ -2756,6 +2756,11 @@ export async function getCaseDetails(caseId: string) {
           sentAt: "desc",
         },
         take: 50,
+        include: {
+          events: {
+            orderBy: { occurredAt: "asc" },
+          },
+        },
       },
       auditLogs: {
         include: {

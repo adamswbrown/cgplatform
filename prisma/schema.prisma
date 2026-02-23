@@ -409,6 +409,12 @@ enum EmailType {
 
 enum EmailStatus {
   SENT
+  DELIVERED
+  DELIVERY_DELAYED
+  OPENED
+  CLICKED
+  BOUNCED
+  COMPLAINED
   FAILED
 }
 
@@ -430,6 +436,7 @@ model EmailLog {
   sentAt                    DateTime    @default(now())
   case                      Case?       @relation(fields: [caseId], references: [id], onDelete: SetNull)
   client                    Client?     @relation(fields: [clientId], references: [id], onDelete: SetNull)
+  events                    EmailEvent[]
   createdAt                 DateTime    @default(now())
   updatedAt                 DateTime    @updatedAt
 
@@ -438,6 +445,19 @@ model EmailLog {
   @@index([relatedFormAccessPinId])
   @@index([relatedIntakeInviteId])
   @@index([caseId, respondedAt])
+  @@index([providerMessageId])
+}
+
+model EmailEvent {
+  id            String   @id @default(cuid())
+  emailLogId    String
+  eventType     String
+  occurredAt    DateTime
+  rawPayload    Json?
+  emailLog      EmailLog @relation(fields: [emailLogId], references: [id], onDelete: Cascade)
+  createdAt     DateTime @default(now())
+
+  @@index([emailLogId, occurredAt])
 }
 
 model SpecialistAvailabilityWindow {
