@@ -16,6 +16,10 @@ enum CaseStatus {
   NEW
   AWAITING_REVIEW
   MATCHED
+  COUNSELLOR_PROPOSED
+  COUNSELLOR_ACCEPTED
+  SLOT_PROPOSED
+  SLOT_CONFIRMED
   AGREEMENT_PENDING
   READY_TO_SCHEDULE
   SCHEDULED
@@ -54,6 +58,9 @@ enum WorkflowStepCode {
   CONSENT_FORM
   AGREEMENT_FORM
   OUTTAKE_FORM
+  TRIAGE_REVIEW
+  COUNSELLOR_ACCEPTANCE
+  SLOT_ACCEPTANCE
   CUSTOM
 }
 
@@ -110,6 +117,10 @@ model Case {
   formAccessPins       FormAccessPin[]
   emailLogs            EmailLog[]
   auditLogs            AuditLog[]
+  triageRecords        TriageRecord[]
+  caseProposals        CaseProposal[]
+  slotProposals        SlotProposal[]
+  notifications        Notification[]
   createdAt            DateTime           @default(now())
   updatedAt            DateTime           @updatedAt
 
@@ -173,6 +184,8 @@ model Specialist {
   sessions                  Session[]
   assignedCases             Case[]       @relation("CaseAssignedSpecialist")
   availabilityWindows       SpecialistAvailabilityWindow[]
+  caseProposals             CaseProposal[]
+  slotProposals             SlotProposal[]
   userAccount               UserAccount?
   createdAt                 DateTime     @default(now())
   updatedAt                 DateTime     @updatedAt
@@ -314,6 +327,10 @@ model UserAccount {
   issuedFormAccessPins FormAccessPin[] @relation("FormAccessPinIssuer")
   issuedIntakeAccessInvites IntakeAccessInvite[] @relation("IntakeAccessInviteIssuer")
   managedSpecialistAvailabilityWindows SpecialistAvailabilityWindow[] @relation("SpecialistAvailabilityUpdatedBy")
+  notifications              Notification[]
+  proposedCaseProposals      CaseProposal[]   @relation("CaseProposalProposedBy")
+  proposedSlotProposals      SlotProposal[]   @relation("SlotProposalProposedBy")
+  triageRecords              TriageRecord[]   @relation("TriageRecordTriagedBy")
   createdAt      DateTime        @default(now())
   updatedAt      DateTime        @updatedAt
 }
@@ -405,6 +422,14 @@ enum EmailType {
   INTAKE_CONFIRMATION
   FORM_PIN
   INTAKE_ACCESS_INVITE
+  CASE_PROPOSAL_TO_COUNSELLOR
+  CASE_PROPOSAL_RESPONSE
+  SLOT_PROPOSAL_TO_COUNSELLOR
+  SLOT_PROPOSAL_TO_CLIENT
+  SLOT_COUNTER_PROPOSAL
+  SLOT_CONFIRMED_COUNSELLOR
+  SLOT_CONFIRMED_CLIENT
+  TRIAGE_NOTIFICATION
 }
 
 enum EmailStatus {
@@ -481,4 +506,127 @@ model SpecialistAvailabilityWindow {
   @@index([specialistId, startTime, endTime])
   @@index([createdByUserId, createdAt])
   @@index([active, endTime])
+}
+
+// ── Review Workflow ──
+
+enum TriageDecision {
+  APPROVED
+  FLAGGED
+  DECLINED
+}
+
+enum CaseProposalStatus {
+  PENDING
+  ACCEPTED
+  DECLINED
+  EXPIRED
+  CANCELLED
+}
+
+enum SlotProposalStatus {
+  PENDING_COUNSELLOR
+  COUNSELLOR_ACCEPTED
+  PENDING_CLIENT
+  CLIENT_ACCEPTED
+  CLIENT_COUNTER_PROPOSED
+  DECLINED
+  EXPIRED
+  CANCELLED
+  CONFIRMED
+}
+
+enum NotificationType {
+  CASE_PROPOSED
+  CASE_PROPOSAL_ACCEPTED
+  CASE_PROPOSAL_DECLINED
+  SLOT_PROPOSED
+  SLOT_COUNSELLOR_ACCEPTED
+  SLOT_CLIENT_ACCEPTED
+  SLOT_CLIENT_COUNTER_PROPOSED
+  SLOT_CONFIRMED
+  TRIAGE_APPROVED
+  TRIAGE_FLAGGED
+  TRIAGE_DECLINED
+  GENERAL
+}
+
+model TriageRecord {
+  id              String          @id @default(cuid())
+  caseId          String
+  decision        TriageDecision
+  notes           String?
+  triagedByUserId String?
+  case            Case            @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  triagedBy       UserAccount?    @relation("TriageRecordTriagedBy", fields: [triagedByUserId], references: [id], onDelete: SetNull)
+  createdAt       DateTime        @default(now())
+
+  @@index([caseId, createdAt])
+}
+
+model CaseProposal {
+  id               String             @id @default(cuid())
+  caseId           String
+  specialistId     String
+  status           CaseProposalStatus @default(PENDING)
+  proposedByUserId String?
+  proposalNote     String?
+  responseNote     String?
+  respondedAt      DateTime?
+  expiresAt        DateTime?
+  case             Case               @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  specialist       Specialist         @relation(fields: [specialistId], references: [id], onDelete: Restrict)
+  proposedBy       UserAccount?       @relation("CaseProposalProposedBy", fields: [proposedByUserId], references: [id], onDelete: SetNull)
+  createdAt        DateTime           @default(now())
+  updatedAt        DateTime           @updatedAt
+
+  @@index([caseId, status])
+  @@index([specialistId, status])
+  @@index([expiresAt])
+}
+
+model SlotProposal {
+  id                       String             @id @default(cuid())
+  caseId                   String
+  specialistId             String
+  proposedByUserId         String?
+  status                   SlotProposalStatus @default(PENDING_COUNSELLOR)
+  proposedStartTime        DateTime
+  proposedEndTime          DateTime
+  proposedTimezone         String             @default("Europe/London")
+  counterProposedStartTime DateTime?
+  counterProposedEndTime   DateTime?
+  counsellorRespondedAt    DateTime?
+  clientRespondedAt        DateTime?
+  tocAcceptedAt            DateTime?
+  proposalNote             String?
+  responseNote             String?
+  expiresAt                DateTime?
+  case                     Case               @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  specialist               Specialist         @relation(fields: [specialistId], references: [id], onDelete: Restrict)
+  proposedBy               UserAccount?       @relation("SlotProposalProposedBy", fields: [proposedByUserId], references: [id], onDelete: SetNull)
+  createdAt                DateTime           @default(now())
+  updatedAt                DateTime           @updatedAt
+
+  @@index([caseId, status])
+  @@index([specialistId, status])
+  @@index([expiresAt])
+}
+
+model Notification {
+  id        String           @id @default(cuid())
+  userId    String
+  type      NotificationType
+  title     String
+  body      String?
+  caseId    String?
+  linkUrl   String?
+  readAt    DateTime?
+  user      UserAccount      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  case      Case?            @relation(fields: [caseId], references: [id], onDelete: SetNull)
+  createdAt DateTime         @default(now())
+
+  @@index([userId, readAt, createdAt])
+  @@index([userId, createdAt])
+  @@index([caseId])
 }

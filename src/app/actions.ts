@@ -1,6 +1,6 @@
 "use server";
 
-import { CaseStatus, EmailStatus, EmailType, UserRole, WorkflowStepCode } from "@prisma/client";
+import { CaseStatus, EmailStatus, EmailType, TriageDecision, UserRole, WorkflowStepCode } from "@prisma/client";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { z } from "zod";
@@ -17,11 +17,15 @@ import {
   domainErrorMessage,
   isDomainError,
   overrideCaseAssignment,
+  proposeCaseToCounsellor,
+  proposeSlot,
   transitionCaseStatus,
+  triageCase,
   updateCaseIntakeReviewNotes,
   updateSpecialistProfile,
   updateWorkflowStep,
 } from "@/lib/case-service";
+import { markAllRead, markRead } from "@/lib/notification-service";
 import {
   destinationForUserRole,
   requirePageUser,
@@ -1400,4 +1404,122 @@ export async function updateWorkflowStepAction(formData: FormData) {
   } catch (error) {
     redirectWithActionError(redirectTo, error);
   }
+}
+
+// ── Review Workflow Actions ──
+
+export async function triageCaseAction(formData: FormData) {
+  const user = await requirePageUser([UserRole.OPS]);
+  const caseId = String(formData.get("caseId") || "").trim();
+  const decision = String(formData.get("decision") || "").trim();
+  const notes = String(formData.get("notes") || "").trim();
+  const redirectTo = String(formData.get("redirectTo") || `/admin/cases/${caseId}`);
+
+  if (!caseId) {
+    redirect(encodeErrorPath(redirectTo, "Case is required."));
+  }
+
+  if (!Object.values(TriageDecision).includes(decision as TriageDecision)) {
+    redirect(encodeErrorPath(redirectTo, "Invalid triage decision."));
+  }
+
+  try {
+    await triageCase({
+      caseId,
+      decision: decision as TriageDecision,
+      notes: notes || undefined,
+      actorUserId: user.id,
+    });
+
+    revalidatePath("/admin/cases");
+    revalidatePath(redirectTo);
+    redirect(redirectTo);
+  } catch (error) {
+    redirectWithActionError(redirectTo, error);
+  }
+}
+
+export async function proposeCaseToCounsellorAction(formData: FormData) {
+  const user = await requirePageUser([UserRole.OPS]);
+  const caseId = String(formData.get("caseId") || "").trim();
+  const specialistId = String(formData.get("specialistId") || "").trim();
+  const proposalNote = String(formData.get("proposalNote") || "").trim();
+  const redirectTo = String(formData.get("redirectTo") || `/admin/cases/${caseId}`);
+
+  if (!caseId || !specialistId) {
+    redirect(encodeErrorPath(redirectTo, "Case and specialist are required."));
+  }
+
+  try {
+    await proposeCaseToCounsellor({
+      caseId,
+      specialistId,
+      proposalNote: proposalNote || undefined,
+      actorUserId: user.id,
+    });
+
+    revalidatePath("/admin/cases");
+    revalidatePath(redirectTo);
+    redirect(redirectTo);
+  } catch (error) {
+    redirectWithActionError(redirectTo, error);
+  }
+}
+
+export async function proposeSlotAction(formData: FormData) {
+  const user = await requirePageUser([UserRole.OPS]);
+  const caseId = String(formData.get("caseId") || "").trim();
+  const startTime = String(formData.get("proposedStartTime") || "").trim();
+  const endTime = String(formData.get("proposedEndTime") || "").trim();
+  const timezone = String(formData.get("proposedTimezone") || "Europe/London").trim();
+  const proposalNote = String(formData.get("proposalNote") || "").trim();
+  const redirectTo = String(formData.get("redirectTo") || `/admin/cases/${caseId}`);
+
+  if (!caseId || !startTime || !endTime) {
+    redirect(encodeErrorPath(redirectTo, "Case, start time, and end time are required."));
+  }
+
+  const parsedStart = new Date(startTime);
+  const parsedEnd = new Date(endTime);
+
+  if (isNaN(parsedStart.getTime()) || isNaN(parsedEnd.getTime())) {
+    redirect(encodeErrorPath(redirectTo, "Invalid date/time values."));
+  }
+
+  if (parsedEnd <= parsedStart) {
+    redirect(encodeErrorPath(redirectTo, "End time must be after start time."));
+  }
+
+  try {
+    await proposeSlot({
+      caseId,
+      proposedStartTime: parsedStart,
+      proposedEndTime: parsedEnd,
+      proposedTimezone: timezone,
+      proposalNote: proposalNote || undefined,
+      actorUserId: user.id,
+    });
+
+    revalidatePath("/admin/cases");
+    revalidatePath(redirectTo);
+    redirect(redirectTo);
+  } catch (error) {
+    redirectWithActionError(redirectTo, error);
+  }
+}
+
+export async function markNotificationReadAction(formData: FormData) {
+  const user = await requirePageUser([UserRole.OPS, UserRole.SPECIALIST]);
+  const notificationId = String(formData.get("notificationId") || "").trim();
+
+  if (!notificationId) return;
+
+  await markRead(notificationId, user.id);
+  revalidatePath("/");
+}
+
+export async function markAllNotificationsReadAction() {
+  const user = await requirePageUser([UserRole.OPS, UserRole.SPECIALIST]);
+  await markAllRead(user.id);
+  revalidatePath("/");
 }
