@@ -2,7 +2,7 @@ import { UserRole } from "@prisma/client";
 import { updateOperationalSettingsAction } from "@/app/actions";
 import { AuthenticatedShell } from "@/components/authenticated-shell";
 import { requirePageUser } from "@/lib/auth";
-import { getOperationalSettings } from "@/lib/admin-settings";
+import { getOperationalSettings, minuteOfDayToDisplay } from "@/lib/admin-settings";
 
 type OperationalSettingsPageProps = {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
@@ -319,79 +319,46 @@ export default async function OperationalSettingsPage({
 
           <div className="grid gap-4 md:grid-cols-2">
             <div>
-              <label
-                htmlFor="manualProviderMorningStartHour"
-                className="mb-1 block text-sm font-medium"
-              >
-                Morning window start hour (24h)
+              <label htmlFor="manualProviderMorningStartMinute" className="mb-1 block text-sm font-medium">
+                Morning block start (minute of day) <span className="text-xs text-[color:var(--muted)]">Currently: {minuteOfDayToDisplay(settings.manualProviderMorningStartMinute)}</span>
               </label>
-              <input
-                id="manualProviderMorningStartHour"
-                name="manualProviderMorningStartHour"
-                type="number"
-                min={0}
-                max={23}
-                defaultValue={settings.manualProviderMorningStartHour}
-                className="w-full px-3 py-2"
-                required
-              />
+              <input id="manualProviderMorningStartMinute" name="manualProviderMorningStartMinute" type="number" min={0} max={1439} defaultValue={settings.manualProviderMorningStartMinute} className="w-full px-3 py-2" required />
             </div>
             <div>
-              <label
-                htmlFor="manualProviderMorningEndHour"
-                className="mb-1 block text-sm font-medium"
-              >
-                Morning window end hour (24h)
+              <label htmlFor="manualProviderMorningEndMinute" className="mb-1 block text-sm font-medium">
+                Morning block end (minute of day) <span className="text-xs text-[color:var(--muted)]">Currently: {minuteOfDayToDisplay(settings.manualProviderMorningEndMinute)}</span>
               </label>
-              <input
-                id="manualProviderMorningEndHour"
-                name="manualProviderMorningEndHour"
-                type="number"
-                min={1}
-                max={23}
-                defaultValue={settings.manualProviderMorningEndHour}
-                className="w-full px-3 py-2"
-                required
-              />
+              <input id="manualProviderMorningEndMinute" name="manualProviderMorningEndMinute" type="number" min={1} max={1439} defaultValue={settings.manualProviderMorningEndMinute} className="w-full px-3 py-2" required />
             </div>
           </div>
 
           <div className="grid gap-4 md:grid-cols-2">
             <div>
-              <label
-                htmlFor="manualProviderAfternoonStartHour"
-                className="mb-1 block text-sm font-medium"
-              >
-                Afternoon window start hour (24h)
+              <label htmlFor="manualProviderAfternoonStartMinute" className="mb-1 block text-sm font-medium">
+                Afternoon block start (minute of day) <span className="text-xs text-[color:var(--muted)]">Currently: {minuteOfDayToDisplay(settings.manualProviderAfternoonStartMinute)}</span>
               </label>
-              <input
-                id="manualProviderAfternoonStartHour"
-                name="manualProviderAfternoonStartHour"
-                type="number"
-                min={0}
-                max={23}
-                defaultValue={settings.manualProviderAfternoonStartHour}
-                className="w-full px-3 py-2"
-                required
-              />
+              <input id="manualProviderAfternoonStartMinute" name="manualProviderAfternoonStartMinute" type="number" min={0} max={1439} defaultValue={settings.manualProviderAfternoonStartMinute} className="w-full px-3 py-2" required />
             </div>
             <div>
-              <label
-                htmlFor="manualProviderAfternoonEndHour"
-                className="mb-1 block text-sm font-medium"
-              >
-                Afternoon window end hour (24h)
+              <label htmlFor="manualProviderAfternoonEndMinute" className="mb-1 block text-sm font-medium">
+                Afternoon block end (minute of day) <span className="text-xs text-[color:var(--muted)]">Currently: {minuteOfDayToDisplay(settings.manualProviderAfternoonEndMinute)}</span>
               </label>
-              <input
-                id="manualProviderAfternoonEndHour"
-                name="manualProviderAfternoonEndHour"
-                type="number"
-                min={1}
-                max={23}
-                defaultValue={settings.manualProviderAfternoonEndHour}
-                className="w-full px-3 py-2"
-                required
-              />
+              <input id="manualProviderAfternoonEndMinute" name="manualProviderAfternoonEndMinute" type="number" min={1} max={1439} defaultValue={settings.manualProviderAfternoonEndMinute} className="w-full px-3 py-2" required />
+            </div>
+          </div>
+
+          <div className="grid gap-4 md:grid-cols-2">
+            <div>
+              <label htmlFor="manualProviderEveningStartMinute" className="mb-1 block text-sm font-medium">
+                Evening block start (minute of day) <span className="text-xs text-[color:var(--muted)]">Currently: {minuteOfDayToDisplay(settings.manualProviderEveningStartMinute)}</span>
+              </label>
+              <input id="manualProviderEveningStartMinute" name="manualProviderEveningStartMinute" type="number" min={0} max={1439} defaultValue={settings.manualProviderEveningStartMinute} className="w-full px-3 py-2" required />
+            </div>
+            <div>
+              <label htmlFor="manualProviderEveningEndMinute" className="mb-1 block text-sm font-medium">
+                Evening block end (minute of day) <span className="text-xs text-[color:var(--muted)]">Currently: {minuteOfDayToDisplay(settings.manualProviderEveningEndMinute)}</span>
+              </label>
+              <input id="manualProviderEveningEndMinute" name="manualProviderEveningEndMinute" type="number" min={1} max={1439} defaultValue={settings.manualProviderEveningEndMinute} className="w-full px-3 py-2" required />
             </div>
           </div>
 

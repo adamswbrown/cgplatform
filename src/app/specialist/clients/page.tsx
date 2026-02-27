@@ -27,7 +27,6 @@ export default async function SpecialistClientsPage() {
         { href: "/specialist/sessions", label: "My Sessions" },
         { href: "/specialist/reviews", label: "Pending Reviews" },
         { href: "/specialist/clients", label: "My Clients" },
-        { href: "/specialist/availability", label: "My Availability" },
       ]}
     >
       <section className="overflow-hidden rounded-2xl border border-[color:var(--border)] bg-[color:var(--surface)] shadow-sm">

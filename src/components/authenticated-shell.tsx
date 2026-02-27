@@ -36,7 +36,6 @@ const SPECIALIST_NAV_PRIORITY: string[] = [
   "/specialist/sessions",
   "/specialist/reviews",
   "/specialist/clients",
-  "/specialist/availability",
 ];
 
 const OPS_SETTINGS_NAV_PRIORITY: string[] = [

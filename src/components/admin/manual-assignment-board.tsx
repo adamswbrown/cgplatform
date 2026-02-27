@@ -13,8 +13,8 @@ import { formatStatus, statusColorKey } from "@/lib/format";
 type TimeBlock = "MORNING" | "AFTERNOON" | "EVENING";
 type BoardViewMode = "kanban" | "calendar";
 type BlockWindow = {
-  startHour: number;
-  endHour: number;
+  startMinuteOfDay: number;
+  endMinuteOfDay: number;
 };
 
 type AssignmentCase = {
@@ -84,13 +84,18 @@ function assignmentKey(specialistId: string, block: TimeBlock) {
 }
 
 function formatWindowLabel(window: BlockWindow) {
-  return `${String(window.startHour).padStart(2, "0")}:00-${String(window.endHour).padStart(2, "0")}:00`;
+  const startH = String(Math.floor(window.startMinuteOfDay / 60)).padStart(2, "0");
+  const startM = String(window.startMinuteOfDay % 60).padStart(2, "0");
+  const endH = String(Math.floor(window.endMinuteOfDay / 60)).padStart(2, "0");
+  const endM = String(window.endMinuteOfDay % 60).padStart(2, "0");
+  return `${startH}:${startM}-${endH}:${endM}`;
 }
 
 function blockFromHour(hour: number, blockWindows: Record<TimeBlock, BlockWindow>): TimeBlock {
+  const minuteOfDay = hour * 60;
   for (const block of BLOCKS) {
     const window = blockWindows[block];
-    if (hour >= window.startHour && hour < window.endHour) {
+    if (minuteOfDay >= window.startMinuteOfDay && minuteOfDay < window.endMinuteOfDay) {
       return block;
     }
   }

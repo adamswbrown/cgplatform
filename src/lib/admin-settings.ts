@@ -2,6 +2,22 @@ import { db } from "@/lib/db";
 
 export const OPERATIONAL_SETTINGS_KEY = "operational_settings";
 
+/** Convert minute-of-day to hours and minutes. E.g. 570 → { hour: 9, minute: 30 } */
+export function minuteOfDayToHoursMinutes(minuteOfDay: number): { hour: number; minute: number } {
+  return { hour: Math.floor(minuteOfDay / 60), minute: minuteOfDay % 60 };
+}
+
+/** Convert minute-of-day to display string. E.g. 570 → "9:30" */
+export function minuteOfDayToDisplay(minuteOfDay: number): string {
+  const { hour, minute } = minuteOfDayToHoursMinutes(minuteOfDay);
+  return `${hour}:${String(minute).padStart(2, "0")}`;
+}
+
+/** Convert hours and minutes to minute-of-day. E.g. 9, 30 → 570 */
+export function hoursMinutesToMinuteOfDay(hour: number, minute: number): number {
+  return hour * 60 + minute;
+}
+
 export type SchedulingAssignmentMode = "manual" | "auto";
 export type SchedulingEngineType = "manual" | "calcom" | "microsoft_bookings";
 export type IntakeSourceType = "SECURE_LINK" | "MICROSOFT_FORMS" | "JOTFORM" | "WEB_FORM";
@@ -19,10 +35,12 @@ export type OperationalSettings = {
   requireOuttakeBeforeClose: boolean;
   manualProviderHorizonDays: number;
   manualProviderSlotIncrementMinutes: number;
-  manualProviderMorningStartHour: number;
-  manualProviderMorningEndHour: number;
-  manualProviderAfternoonStartHour: number;
-  manualProviderAfternoonEndHour: number;
+  manualProviderMorningStartMinute: number;
+  manualProviderMorningEndMinute: number;
+  manualProviderAfternoonStartMinute: number;
+  manualProviderAfternoonEndMinute: number;
+  manualProviderEveningStartMinute: number;
+  manualProviderEveningEndMinute: number;
   defaultFormPinExpiresHours: number;
   defaultFormPinMaxAttempts: number;
   defaultIntakeInviteExpiresHours: number;
@@ -45,10 +63,12 @@ const DEFAULT_OPERATIONAL_SETTINGS: OperationalSettings = {
   requireOuttakeBeforeClose: true,
   manualProviderHorizonDays: 14,
   manualProviderSlotIncrementMinutes: 10,
-  manualProviderMorningStartHour: 9,
-  manualProviderMorningEndHour: 12,
-  manualProviderAfternoonStartHour: 13,
-  manualProviderAfternoonEndHour: 17,
+  manualProviderMorningStartMinute: 570,    // 9:30
+  manualProviderMorningEndMinute: 750,      // 12:30
+  manualProviderAfternoonStartMinute: 780,  // 13:00
+  manualProviderAfternoonEndMinute: 960,    // 16:00
+  manualProviderEveningStartMinute: 1020,   // 17:00
+  manualProviderEveningEndMinute: 1260,     // 21:00
   defaultFormPinExpiresHours: 72,
   defaultFormPinMaxAttempts: 5,
   defaultIntakeInviteExpiresHours: 72,
@@ -212,50 +232,68 @@ function normalizeOperationalSettings(candidate: unknown): OperationalSettings {
     specialistAvailabilityMaxGridDays = specialistAvailabilityDefaultGridDays;
   }
 
-  let manualProviderMorningStartHour = clampInteger(
-    parsed.manualProviderMorningStartHour,
-    DEFAULT_OPERATIONAL_SETTINGS.manualProviderMorningStartHour,
+  let manualProviderMorningStartMinute = clampInteger(
+    parsed.manualProviderMorningStartMinute,
+    DEFAULT_OPERATIONAL_SETTINGS.manualProviderMorningStartMinute,
     0,
-    23,
+    1439,
   );
-  let manualProviderMorningEndHour = clampInteger(
-    parsed.manualProviderMorningEndHour,
-    DEFAULT_OPERATIONAL_SETTINGS.manualProviderMorningEndHour,
+  let manualProviderMorningEndMinute = clampInteger(
+    parsed.manualProviderMorningEndMinute,
+    DEFAULT_OPERATIONAL_SETTINGS.manualProviderMorningEndMinute,
     1,
-    23,
+    1439,
   );
 
-  if (manualProviderMorningEndHour <= manualProviderMorningStartHour) {
-    manualProviderMorningStartHour = DEFAULT_OPERATIONAL_SETTINGS.manualProviderMorningStartHour;
-    manualProviderMorningEndHour = DEFAULT_OPERATIONAL_SETTINGS.manualProviderMorningEndHour;
+  if (manualProviderMorningEndMinute <= manualProviderMorningStartMinute) {
+    manualProviderMorningStartMinute = DEFAULT_OPERATIONAL_SETTINGS.manualProviderMorningStartMinute;
+    manualProviderMorningEndMinute = DEFAULT_OPERATIONAL_SETTINGS.manualProviderMorningEndMinute;
   }
 
-  let manualProviderAfternoonStartHour = clampInteger(
-    parsed.manualProviderAfternoonStartHour,
-    DEFAULT_OPERATIONAL_SETTINGS.manualProviderAfternoonStartHour,
+  let manualProviderAfternoonStartMinute = clampInteger(
+    parsed.manualProviderAfternoonStartMinute,
+    DEFAULT_OPERATIONAL_SETTINGS.manualProviderAfternoonStartMinute,
     0,
-    23,
+    1439,
   );
-  let manualProviderAfternoonEndHour = clampInteger(
-    parsed.manualProviderAfternoonEndHour,
-    DEFAULT_OPERATIONAL_SETTINGS.manualProviderAfternoonEndHour,
+  let manualProviderAfternoonEndMinute = clampInteger(
+    parsed.manualProviderAfternoonEndMinute,
+    DEFAULT_OPERATIONAL_SETTINGS.manualProviderAfternoonEndMinute,
     1,
-    23,
+    1439,
   );
 
-  if (manualProviderAfternoonEndHour <= manualProviderAfternoonStartHour) {
-    manualProviderAfternoonStartHour =
-      DEFAULT_OPERATIONAL_SETTINGS.manualProviderAfternoonStartHour;
-    manualProviderAfternoonEndHour = DEFAULT_OPERATIONAL_SETTINGS.manualProviderAfternoonEndHour;
+  if (manualProviderAfternoonEndMinute <= manualProviderAfternoonStartMinute) {
+    manualProviderAfternoonStartMinute =
+      DEFAULT_OPERATIONAL_SETTINGS.manualProviderAfternoonStartMinute;
+    manualProviderAfternoonEndMinute = DEFAULT_OPERATIONAL_SETTINGS.manualProviderAfternoonEndMinute;
   }
 
-  if (manualProviderAfternoonStartHour < manualProviderMorningEndHour) {
-    manualProviderAfternoonStartHour = manualProviderMorningEndHour;
-    if (manualProviderAfternoonEndHour <= manualProviderAfternoonStartHour) {
-      manualProviderAfternoonStartHour =
-        DEFAULT_OPERATIONAL_SETTINGS.manualProviderAfternoonStartHour;
-      manualProviderAfternoonEndHour = DEFAULT_OPERATIONAL_SETTINGS.manualProviderAfternoonEndHour;
+  if (manualProviderAfternoonStartMinute < manualProviderMorningEndMinute) {
+    manualProviderAfternoonStartMinute = manualProviderMorningEndMinute;
+    if (manualProviderAfternoonEndMinute <= manualProviderAfternoonStartMinute) {
+      manualProviderAfternoonStartMinute =
+        DEFAULT_OPERATIONAL_SETTINGS.manualProviderAfternoonStartMinute;
+      manualProviderAfternoonEndMinute = DEFAULT_OPERATIONAL_SETTINGS.manualProviderAfternoonEndMinute;
     }
+  }
+
+  let manualProviderEveningStartMinute = clampInteger(
+    parsed.manualProviderEveningStartMinute,
+    DEFAULT_OPERATIONAL_SETTINGS.manualProviderEveningStartMinute,
+    0,
+    1439,
+  );
+  let manualProviderEveningEndMinute = clampInteger(
+    parsed.manualProviderEveningEndMinute,
+    DEFAULT_OPERATIONAL_SETTINGS.manualProviderEveningEndMinute,
+    1,
+    1439,
+  );
+
+  if (manualProviderEveningEndMinute <= manualProviderEveningStartMinute) {
+    manualProviderEveningStartMinute = DEFAULT_OPERATIONAL_SETTINGS.manualProviderEveningStartMinute;
+    manualProviderEveningEndMinute = DEFAULT_OPERATIONAL_SETTINGS.manualProviderEveningEndMinute;
   }
 
   return {
@@ -305,10 +343,12 @@ function normalizeOperationalSettings(candidate: unknown): OperationalSettings {
       5,
       60,
     ),
-    manualProviderMorningStartHour,
-    manualProviderMorningEndHour,
-    manualProviderAfternoonStartHour,
-    manualProviderAfternoonEndHour,
+    manualProviderMorningStartMinute,
+    manualProviderMorningEndMinute,
+    manualProviderAfternoonStartMinute,
+    manualProviderAfternoonEndMinute,
+    manualProviderEveningStartMinute,
+    manualProviderEveningEndMinute,
     defaultFormPinExpiresHours: clampInteger(
       parsed.defaultFormPinExpiresHours,
       DEFAULT_OPERATIONAL_SETTINGS.defaultFormPinExpiresHours,

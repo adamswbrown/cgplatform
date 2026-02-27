@@ -57,6 +57,32 @@ export async function POST(request: Request, context: RouteContext) {
         : undefined,
     });
 
+    // If accepted, include participant info for inline ToC form
+    if (payload.accept) {
+      const caseRecord = await db.case.findUnique({
+        where: { id: caseId },
+        include: {
+          participants: {
+            where: { role: "PRIMARY" },
+            include: { client: { select: { email: true, firstName: true, lastName: true } } },
+          },
+        },
+      });
+
+      const primaryParticipant = caseRecord?.participants[0]?.client;
+      return NextResponse.json({
+        ok: true,
+        data: result,
+        tocInfo: primaryParticipant
+          ? {
+              caseId,
+              participantEmail: primaryParticipant.email,
+              participantName: `${primaryParticipant.firstName} ${primaryParticipant.lastName}`.trim(),
+            }
+          : null,
+      });
+    }
+
     return NextResponse.json({ ok: true, data: result });
   } catch (error) {
     if (error instanceof z.ZodError) {

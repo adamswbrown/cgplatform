@@ -20,7 +20,6 @@ export default async function SpecialistSessionsPage() {
           { href: "/specialist/sessions", label: "My Sessions" },
           { href: "/specialist/reviews", label: "Pending Reviews" },
           { href: "/specialist/clients", label: "My Clients" },
-          { href: "/specialist/availability", label: "My Availability" },
         ]}
       >
         <p className="cg-alert cg-alert-error">
@@ -41,8 +40,8 @@ export default async function SpecialistSessionsPage() {
       currentPath="/specialist/sessions"
       navItems={[
         { href: "/specialist/sessions", label: "My Sessions" },
+        { href: "/specialist/reviews", label: "Pending Reviews" },
         { href: "/specialist/clients", label: "My Clients" },
-        { href: "/specialist/availability", label: "My Availability" },
       ]}
     >
       <div className="grid gap-4">
@@ -54,12 +53,9 @@ export default async function SpecialistSessionsPage() {
               </svg>
               <p className="text-sm font-medium">No upcoming sessions</p>
               <p className="mt-1 text-xs">When sessions are scheduled for you, they will appear here.</p>
-              <Link
-                href="/specialist/availability"
-                className="mt-3 rounded-full border border-[color:var(--border)] px-4 py-1.5 text-xs font-semibold hover:bg-[color:var(--accent-soft)]"
-              >
-                Check your availability
-              </Link>
+              <p className="mt-3 text-xs text-[color:var(--muted)]">
+                Contact operations if you have questions about your schedule.
+              </p>
             </div>
           </section>
         ) : (

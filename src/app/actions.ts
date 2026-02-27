@@ -830,41 +830,41 @@ export async function updateOperationalSettingsAction(formData: FormData) {
           "manualProviderSlotIncrementMinutes",
           "Manual provider slot increment minutes",
         ),
-        manualProviderMorningStartHour: parseIntegerField(
+        manualProviderMorningStartMinute: parseIntegerField(
           formData,
-          "manualProviderMorningStartHour",
-          "Manual provider morning start hour",
-          {
-            min: 0,
-            max: 23,
-          },
+          "manualProviderMorningStartMinute",
+          "Morning block start (minute of day)",
+          { min: 0, max: 1439 },
         ),
-        manualProviderMorningEndHour: parseIntegerField(
+        manualProviderMorningEndMinute: parseIntegerField(
           formData,
-          "manualProviderMorningEndHour",
-          "Manual provider morning end hour",
-          {
-            min: 1,
-            max: 23,
-          },
+          "manualProviderMorningEndMinute",
+          "Morning block end (minute of day)",
+          { min: 1, max: 1439 },
         ),
-        manualProviderAfternoonStartHour: parseIntegerField(
+        manualProviderAfternoonStartMinute: parseIntegerField(
           formData,
-          "manualProviderAfternoonStartHour",
-          "Manual provider afternoon start hour",
-          {
-            min: 0,
-            max: 23,
-          },
+          "manualProviderAfternoonStartMinute",
+          "Afternoon block start (minute of day)",
+          { min: 0, max: 1439 },
         ),
-        manualProviderAfternoonEndHour: parseIntegerField(
+        manualProviderAfternoonEndMinute: parseIntegerField(
           formData,
-          "manualProviderAfternoonEndHour",
-          "Manual provider afternoon end hour",
-          {
-            min: 1,
-            max: 23,
-          },
+          "manualProviderAfternoonEndMinute",
+          "Afternoon block end (minute of day)",
+          { min: 1, max: 1439 },
+        ),
+        manualProviderEveningStartMinute: parseIntegerField(
+          formData,
+          "manualProviderEveningStartMinute",
+          "Evening block start (minute of day)",
+          { min: 0, max: 1439 },
+        ),
+        manualProviderEveningEndMinute: parseIntegerField(
+          formData,
+          "manualProviderEveningEndMinute",
+          "Evening block end (minute of day)",
+          { min: 1, max: 1439 },
         ),
         defaultFormPinExpiresHours: parsePositiveIntegerField(
           formData,

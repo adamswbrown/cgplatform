@@ -16,6 +16,7 @@ The product supports counselling case management with workflow-gated scheduling,
 - [End Client Guide](./end-client.md)
 - [Functionality Reference](./functionality-reference.md)
 - [Resend Setup Guide](./resend-setup.md)
+- [Outlook Calendar Sync Setup](./outlook-calendar-sync-setup.md)
 - [Persona Screenshots](./PERSONA_UI_SCREENSHOTS.md)
 - [E2E Verification Report](./E2E_VERIFICATION_REPORT.md)
 

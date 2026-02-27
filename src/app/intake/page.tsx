@@ -46,6 +46,13 @@ export default async function IntakePage({ searchParams }: IntakePageProps) {
                 If you have your secure link, open it directly. It will take you to the PIN entry
                 screen before the intake form.
               </p>
+              <p className="mt-3 text-sm">
+                Alternatively, you can{" "}
+                <Link href="/apply" className="font-medium underline">
+                  apply directly here
+                </Link>
+                .
+              </p>
               <p className="mt-3 text-xs text-[color:var(--muted)]">
                 Staff can issue intake links from the operations dashboard.
               </p>

@@ -32,8 +32,8 @@ type ManualProviderPolicy = {
   horizonDays: number;
   slotIncrementMinutes: number;
   workWindows: Array<{
-    startHour: number;
-    endHour: number;
+    startMinuteOfDay: number;
+    endMinuteOfDay: number;
   }>;
 };
 
@@ -105,12 +105,16 @@ export class ManualSchedulingProvider implements SchedulingProvider {
         slotIncrementMinutes: operationalSettings.manualProviderSlotIncrementMinutes,
         workWindows: [
           {
-            startHour: operationalSettings.manualProviderMorningStartHour,
-            endHour: operationalSettings.manualProviderMorningEndHour,
+            startMinuteOfDay: operationalSettings.manualProviderMorningStartMinute,
+            endMinuteOfDay: operationalSettings.manualProviderMorningEndMinute,
           },
           {
-            startHour: operationalSettings.manualProviderAfternoonStartHour,
-            endHour: operationalSettings.manualProviderAfternoonEndHour,
+            startMinuteOfDay: operationalSettings.manualProviderAfternoonStartMinute,
+            endMinuteOfDay: operationalSettings.manualProviderAfternoonEndMinute,
+          },
+          {
+            startMinuteOfDay: operationalSettings.manualProviderEveningStartMinute,
+            endMinuteOfDay: operationalSettings.manualProviderEveningEndMinute,
           },
         ],
       }));
@@ -218,14 +222,14 @@ export class ManualSchedulingProvider implements SchedulingProvider {
       }
 
       for (const window of policy.workWindows) {
-        const startHour = Math.max(window.startHour, workingHours.startHour);
-        const endHour = Math.min(window.endHour, workingHours.endHour);
-        if (endHour <= startHour) {
+        const startMinute = Math.max(window.startMinuteOfDay, workingHours.startHour * 60);
+        const endMinute = Math.min(window.endMinuteOfDay, workingHours.endHour * 60);
+        if (endMinute <= startMinute) {
           continue;
         }
 
-        const windowStart = makeUtcDate(day, startHour, 0).getTime();
-        const windowEnd = makeUtcDate(day, endHour, 0).getTime();
+        const windowStart = makeUtcDate(day, Math.floor(startMinute / 60), startMinute % 60).getTime();
+        const windowEnd = makeUtcDate(day, Math.floor(endMinute / 60), endMinute % 60).getTime();
 
         for (
           let candidateStart = windowStart;

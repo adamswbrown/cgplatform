@@ -4,6 +4,8 @@ import { useEffect, useMemo, useRef, useState, type PointerEvent } from "react";
 import { useRouter } from "next/navigation";
 import {
   CONTACT_PREFERENCE_ROWS,
+  DAY_OPTIONS,
+  EVENING_ELIGIBLE_DAYS,
   HEARD_ABOUT_OPTIONS,
   LOCATION_OPTIONS,
   PRESENTING_ISSUE_OPTIONS,
@@ -14,7 +16,7 @@ import type { IntakeFormContent } from "@/lib/intake-settings";
 type IntakeMultiStepFormProps = {
   content: IntakeFormContent;
   initialError?: string | null;
-  accessKey: string;
+  accessKey: string | null;
   assignmentMode: "manual" | "auto";
 };
 
@@ -27,7 +29,7 @@ type PublicAvailabilitySlot = {
 
 type YesNo = "yes" | "no";
 
-const STEP_TITLES = ["Application", "Presenting Issue", "Availability"] as const;
+const STEP_TITLES = ["Application", "Presenting Issue", "Availability", "Consent"] as const;
 
 const defaultContactPreferences = {
   contactMainPhone: "yes" as YesNo,
@@ -35,6 +37,7 @@ const defaultContactPreferences = {
   contactSecondPhone: "no" as YesNo,
   leaveVoicemailSecondPhone: "no" as YesNo,
   contactEmail: "yes" as YesNo,
+  contactWhatsApp: "no" as YesNo,
 };
 
 function toLabel(value: string) {
@@ -294,6 +297,7 @@ export function IntakeMultiStepForm({
   const [location, setLocation] = useState<(typeof LOCATION_OPTIONS)[number]>("NEWTOWNARDS");
   const [includeOnline, setIncludeOnline] = useState(false);
   const [timePreferences, setTimePreferences] = useState<(typeof TIME_PREFERENCE_OPTIONS)[number][]>([]);
+  const [dayTimeBlocks, setDayTimeBlocks] = useState<Array<{ day: (typeof DAY_OPTIONS)[number]; block: (typeof TIME_PREFERENCE_OPTIONS)[number] }>>([]);
   const [availabilityNotes, setAvailabilityNotes] = useState("");
   const [availabilitySlots, setAvailabilitySlots] = useState<PublicAvailabilitySlot[]>([]);
   const [selectedSlotKeys, setSelectedSlotKeys] = useState<string[]>([]);
@@ -373,11 +377,21 @@ export function IntakeMultiStepForm({
     );
   };
 
+  const toggleDayTimeBlock = (day: (typeof DAY_OPTIONS)[number], block: (typeof TIME_PREFERENCE_OPTIONS)[number]) => {
+    setDayTimeBlocks((current) => {
+      const exists = current.some((entry) => entry.day === day && entry.block === block);
+      return exists
+        ? current.filter((entry) => !(entry.day === day && entry.block === block))
+        : [...current, { day, block }];
+    });
+  };
+
+  const isDayTimeBlockSelected = (day: (typeof DAY_OPTIONS)[number], block: (typeof TIME_PREFERENCE_OPTIONS)[number]) => {
+    return dayTimeBlocks.some((entry) => entry.day === day && entry.block === block);
+  };
+
   const validateCurrentStep = () => {
     if (step === 0) {
-      if (!currentSignature) {
-        return "Consent signature is required.";
-      }
       if (
         !primaryTitle ||
         !primaryFirstName ||
@@ -435,14 +449,20 @@ export function IntakeMultiStepForm({
     }
 
     if (step === 2) {
-      if (!location || !availabilityNotes.trim()) {
-        return "Please choose a location and provide your availability notes.";
+      if (!location) {
+        return "Please choose a location.";
       }
-      if (timePreferences.length === 0) {
-        return "Please select at least one preferred time of day.";
+      if (dayTimeBlocks.length === 0) {
+        return "Please select at least one day and time block you can commit to.";
       }
       if (assignmentMode === "auto" && availabilitySlots.length > 0 && selectedSlots.length === 0) {
         return "Please select at least one availability slot from the availability widget.";
+      }
+    }
+
+    if (step === 3) {
+      if (!currentSignature) {
+        return "Consent signature is required.";
       }
     }
 
@@ -481,7 +501,7 @@ export function IntakeMultiStepForm({
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          accessKey,
+          ...(accessKey ? { accessKey } : {}),
           participantType,
           counsellingType,
           consent: {
@@ -543,8 +563,9 @@ export function IntakeMultiStepForm({
           availability: {
             location,
             includeOnline,
-            notes: availabilityNotes,
-            timePreferences,
+            notes: availabilityNotes || undefined,
+            dayTimeBlocks,
+            timePreferences: [...new Set(dayTimeBlocks.map((entry) => entry.block))],
             selectedSlots:
               assignmentMode === "auto"
                 ? selectedSlots.map((slot) => ({
@@ -630,30 +651,38 @@ export function IntakeMultiStepForm({
             Application for counselling. Complete all required details before progressing.
           </p>
 
-          <SignatureCapture
-            signatureType={signatureType}
-            setSignatureType={setSignatureType}
-            typedSignature={typedSignature}
-            setTypedSignature={setTypedSignature}
-            drawnSignature={drawnSignature}
-            setDrawnSignature={setDrawnSignature}
-          />
+          <div className="rounded-2xl border-2 border-[color:var(--cg-dark-accent)] bg-[color:var(--accent-soft)]/30 p-5">
+            <p className="text-base font-semibold">Are you applying as an individual or as a couple? *</p>
+            <p className="mt-1 text-sm text-[color:var(--muted)]">
+              This determines the type of counselling and the information we need from you.
+            </p>
+            <div className="mt-3 flex gap-4">
+              <label className={`flex cursor-pointer items-center gap-2 rounded-xl border-2 px-5 py-3 text-sm font-medium transition ${counsellingType === "individual" ? "border-[color:var(--cg-dark-accent)] bg-white shadow-sm" : "border-[color:var(--border)] hover:border-[color:var(--cg-dark-accent)]/50"}`}>
+                <input
+                  type="radio"
+                  name="counsellingType"
+                  value="individual"
+                  checked={counsellingType === "individual"}
+                  onChange={() => setCounsellingType("individual")}
+                  className="sr-only"
+                />
+                I am applying as an individual
+              </label>
+              <label className={`flex cursor-pointer items-center gap-2 rounded-xl border-2 px-5 py-3 text-sm font-medium transition ${counsellingType === "couples" ? "border-[color:var(--cg-dark-accent)] bg-white shadow-sm" : "border-[color:var(--border)] hover:border-[color:var(--cg-dark-accent)]/50"}`}>
+                <input
+                  type="radio"
+                  name="counsellingType"
+                  value="couples"
+                  checked={counsellingType === "couples"}
+                  onChange={() => setCounsellingType("couples")}
+                  className="sr-only"
+                />
+                We are applying as a couple
+              </label>
+            </div>
+          </div>
 
           <div className="grid gap-4 md:grid-cols-2">
-            <div>
-              <label htmlFor="counsellingType" className="mb-1 block text-sm font-medium">
-                Are you applying for individual or couples counselling? *
-              </label>
-              <select
-                id="counsellingType"
-                value={counsellingType}
-                onChange={(event) => setCounsellingType(event.target.value as "individual" | "couples")}
-                className="w-full px-3 py-2"
-              >
-                <option value="individual">Individual</option>
-                <option value="couples">Couples</option>
-              </select>
-            </div>
             <div>
               <label htmlFor="heardAbout" className="mb-1 block text-sm font-medium">
                 How did you hear about Christian Guidelines? *
@@ -1120,22 +1149,56 @@ export function IntakeMultiStepForm({
             </div>
 
             <div className="mt-4 border-t border-[color:var(--border)] pt-4">
-              <p className="text-sm font-semibold">Which times of day are you usually available? *</p>
-              <div className="mt-2 flex flex-wrap gap-3">
-                {TIME_PREFERENCE_OPTIONS.map((option) => (
-                  <label
-                    key={option}
-                    className="flex items-center gap-2 rounded-full border border-[color:var(--border)] px-3 py-1.5 text-sm"
-                  >
-                    <input
-                      type="checkbox"
-                      checked={timePreferences.includes(option)}
-                      onChange={() => toggleTimePreference(option)}
-                    />
-                    {toLabel(option)}
-                  </label>
-                ))}
+              <p className="text-sm font-semibold">
+                What day and time can you make yourself available each week for a minimum of 6 weeks? *
+              </p>
+              <p className="mt-1 text-xs text-[color:var(--muted)]">
+                Select all day/time combinations that work for you. Evening sessions (5:00-9:00pm) are only available on Tuesdays and Thursdays.
+              </p>
+
+              <div className="mt-3 overflow-x-auto">
+                <table className="min-w-full text-sm">
+                  <thead>
+                    <tr>
+                      <th className="px-3 py-2 text-left font-medium"></th>
+                      <th className="px-3 py-2 text-center font-medium">Morning<br /><span className="text-xs font-normal text-[color:var(--muted)]">9:30 - 12:30</span></th>
+                      <th className="px-3 py-2 text-center font-medium">Afternoon<br /><span className="text-xs font-normal text-[color:var(--muted)]">1:00 - 4:00</span></th>
+                      <th className="px-3 py-2 text-center font-medium">Evening<br /><span className="text-xs font-normal text-[color:var(--muted)]">5:00 - 9:00</span></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {DAY_OPTIONS.map((day) => (
+                      <tr key={day} className="border-t border-[color:var(--border)]">
+                        <td className="px-3 py-2 font-medium">{toLabel(day)}</td>
+                        {TIME_PREFERENCE_OPTIONS.map((block) => {
+                          const disabled = block === "EVENING" && !EVENING_ELIGIBLE_DAYS.has(day);
+                          const checked = isDayTimeBlockSelected(day, block);
+                          return (
+                            <td key={block} className="px-3 py-2 text-center">
+                              {disabled ? (
+                                <span className="text-xs text-[color:var(--muted)]">&mdash;</span>
+                              ) : (
+                                <input
+                                  type="checkbox"
+                                  checked={checked}
+                                  onChange={() => toggleDayTimeBlock(day, block)}
+                                  className="h-4 w-4"
+                                />
+                              )}
+                            </td>
+                          );
+                        })}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               </div>
+
+              {dayTimeBlocks.length > 0 ? (
+                <p className="mt-2 text-xs text-[color:var(--muted)]">
+                  {dayTimeBlocks.length} time block{dayTimeBlocks.length !== 1 ? "s" : ""} selected
+                </p>
+              ) : null}
             </div>
 
             <div className="mt-5 space-y-3">
@@ -1146,7 +1209,6 @@ export function IntakeMultiStepForm({
                 </div>
               ))}
               <p className="text-sm italic text-[color:var(--muted)]">{content.availability.disclaimer}</p>
-              <p className="text-sm font-semibold">{content.availability.prompt}</p>
             </div>
           </div>
 
@@ -1212,6 +1274,26 @@ export function IntakeMultiStepForm({
               {availabilityNotes.length}/1000
             </p>
           </div>
+        </section>
+      ) : null}
+
+      {step === 3 ? (
+        <section className="space-y-5">
+          <div className="rounded-2xl border border-[color:var(--border)] p-4">
+            <h3 className="text-xl">Consent &amp; Signature</h3>
+            <p className="mt-2 text-sm text-[color:var(--muted)]">
+              Please review the information you have provided, then sign below to confirm your application.
+            </p>
+          </div>
+
+          <SignatureCapture
+            signatureType={signatureType}
+            setSignatureType={setSignatureType}
+            typedSignature={typedSignature}
+            setTypedSignature={setTypedSignature}
+            drawnSignature={drawnSignature}
+            setDrawnSignature={setDrawnSignature}
+          />
         </section>
       ) : null}
 

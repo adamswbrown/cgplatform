@@ -53,19 +53,23 @@ async function handleModernPayload(request: Request, payload: NewIntakeApiPayloa
   const ipAddress = extractIpAddress(request);
   const riskFlags = extractRiskFlags(payload);
   const signedAt = payload.consent.signedAt ? new Date(payload.consent.signedAt) : new Date();
-  const intakeAccess = await hasValidIntakeAccessSession(payload.accessKey);
-  if (!intakeAccess) {
-    throw new DomainError("This intake form requires PIN verification.", 401);
-  }
+  const isPublicSubmission = !payload.accessKey;
 
-  const allowedEmails = [payload.primary.email, payload.secondary.email]
-    .map((value) => value?.trim().toLowerCase())
-    .filter(Boolean);
-  if (!allowedEmails.includes(intakeAccess.recipientEmail.toLowerCase())) {
-    throw new DomainError(
-      "The verified intake access link does not match the participant details in this submission.",
-      401,
-    );
+  if (!isPublicSubmission) {
+    const intakeAccess = await hasValidIntakeAccessSession(payload.accessKey);
+    if (!intakeAccess) {
+      throw new DomainError("This intake form requires PIN verification.", 401);
+    }
+
+    const allowedEmails = [payload.primary.email, payload.secondary.email]
+      .map((value) => value?.trim().toLowerCase())
+      .filter(Boolean);
+    if (!allowedEmails.includes(intakeAccess.recipientEmail.toLowerCase())) {
+      throw new DomainError(
+        "The verified intake access link does not match the participant details in this submission.",
+        401,
+      );
+    }
   }
 
   const intakeResult = await createCaseFromIntake({
@@ -87,7 +91,7 @@ async function handleModernPayload(request: Request, payload: NewIntakeApiPayloa
     notes: `${payload.presenting.mainIssue}: ${payload.presenting.issueDuration}`,
     counsellingType: payload.counsellingType,
     initialStatus: CaseStatus.AWAITING_REVIEW,
-    intakeSource: "SECURE_LINK",
+    intakeSource: isPublicSubmission ? "PUBLIC_FORM" : "SECURE_LINK",
     autoAllocate: false,
     requestedDurationMinutes: payload.requestedDurationMinutes,
     intakeFormData: payload as unknown as Record<string, unknown>,
@@ -178,7 +182,9 @@ async function handleModernPayload(request: Request, payload: NewIntakeApiPayloa
     });
   }
 
-  await markIntakeAccessInviteUsed(payload.accessKey);
+  if (!isPublicSubmission) {
+    await markIntakeAccessInviteUsed(payload.accessKey);
+  }
 
   const content = await getIntakeFormContent();
   const crisisSummary = summarizeCrisisContacts(content);

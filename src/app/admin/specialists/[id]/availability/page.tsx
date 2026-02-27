@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { UserRole } from "@prisma/client";
 import { AuthenticatedShell } from "@/components/authenticated-shell";
 import { SpecialistAvailabilityCalendar } from "@/components/availability/specialist-availability-calendar";
+import { SyncOutlookButton } from "@/components/availability/sync-outlook-button";
 import { requirePageUser } from "@/lib/auth";
 import { getSpecialistAvailabilityCalendar } from "@/lib/case-service";
 
@@ -43,7 +44,8 @@ export default async function SpecialistAvailabilityOpsPage({
         { href: "/intake", label: "Secure Intake" },
       ]}
     >
-      <div className="mb-3 flex justify-end">
+      <div className="mb-3 flex items-center justify-between">
+        <SyncOutlookButton specialistId={availability.specialist.id} />
         <Link
           href={`/admin/specialists/${availability.specialist.id}`}
           className="rounded-md border border-[color:var(--border)] px-3 py-2 text-sm hover:bg-[color:var(--accent-soft)]"

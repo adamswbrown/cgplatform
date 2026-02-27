@@ -352,8 +352,8 @@ type SpecialistWorkingHours = {
 type ManualAssignmentBlockWindows = Record<
   ManualAssignmentTimeBlock,
   {
-    startHour: number;
-    endHour: number;
+    startMinuteOfDay: number;
+    endMinuteOfDay: number;
   }
 >;
 
@@ -363,10 +363,11 @@ const DEFAULT_SPECIALIST_STANDARD_END_HOUR = 18;
 const MANUAL_ASSIGNMENT_SLOT_MINUTES = 60;
 const FALLBACK_SPECIALIST_AVAILABILITY_GRID_DAYS = 14;
 const FALLBACK_SPECIALIST_AVAILABILITY_MAX_GRID_DAYS = 62;
-const DEFAULT_MANUAL_ASSIGNMENT_BLOCK_WINDOWS = resolveManualAssignmentBlockWindows({
-  startHour: DEFAULT_SPECIALIST_STANDARD_START_HOUR,
-  endHour: DEFAULT_SPECIALIST_STANDARD_END_HOUR,
-});
+const DEFAULT_MANUAL_ASSIGNMENT_BLOCK_WINDOWS: ManualAssignmentBlockWindows = {
+  MORNING: { startMinuteOfDay: 570, endMinuteOfDay: 750 },     // 9:30-12:30
+  AFTERNOON: { startMinuteOfDay: 780, endMinuteOfDay: 960 },   // 13:00-16:00
+  EVENING: { startMinuteOfDay: 1020, endMinuteOfDay: 1260 },   // 17:00-21:00
+};
 
 function clampWorkingHour(value: number, min: number, max: number) {
   if (!Number.isFinite(value)) {
@@ -410,24 +411,20 @@ function normalizeSpecialistWorkingHours(
 function resolveManualAssignmentBlockWindows(
   workingHours: SpecialistWorkingHours,
 ): ManualAssignmentBlockWindows {
-  const morningEnd = Math.min(12, workingHours.endHour);
-  const afternoonStart = Math.max(12, workingHours.startHour);
-  const afternoonEnd = Math.min(17, workingHours.endHour);
-  const eveningStart = Math.max(17, workingHours.startHour);
+  const startMinute = workingHours.startHour * 60;
+  const endMinute = workingHours.endHour * 60;
+  const defaults = DEFAULT_MANUAL_ASSIGNMENT_BLOCK_WINDOWS;
+
+  function clip(block: { startMinuteOfDay: number; endMinuteOfDay: number }) {
+    const s = Math.max(block.startMinuteOfDay, startMinute);
+    const e = Math.min(block.endMinuteOfDay, endMinute);
+    return { startMinuteOfDay: s, endMinuteOfDay: Math.max(s, e) };
+  }
 
   return {
-    MORNING: {
-      startHour: workingHours.startHour,
-      endHour: Math.max(workingHours.startHour, morningEnd),
-    },
-    AFTERNOON: {
-      startHour: afternoonStart,
-      endHour: Math.max(afternoonStart, afternoonEnd),
-    },
-    EVENING: {
-      startHour: eveningStart,
-      endHour: Math.max(eveningStart, workingHours.endHour),
-    },
+    MORNING: clip(defaults.MORNING),
+    AFTERNOON: clip(defaults.AFTERNOON),
+    EVENING: clip(defaults.EVENING),
   };
 }
 
@@ -542,15 +539,15 @@ function slotMatchesManualTimeBlock(
     return false;
   }
 
-  const hour = slot.getHours();
+  const minuteOfDay = slot.getHours() * 60 + slot.getMinutes();
   const window = getManualAssignmentBlockWindow(
     block,
     options?.blockWindows || resolveManualAssignmentBlockWindows(workingHours),
   );
-  if (window.endHour <= window.startHour) {
+  if (window.endMinuteOfDay <= window.startMinuteOfDay) {
     return false;
   }
-  return hour >= window.startHour && hour < window.endHour;
+  return minuteOfDay >= window.startMinuteOfDay && minuteOfDay < window.endMinuteOfDay;
 }
 
 function slotMatchesAnyManualTimeBlock(
@@ -3920,16 +3917,16 @@ export async function addSpecialistAvailabilityPresetBatch(input: {
 
     for (const block of normalizedBlocks) {
       const window = getManualAssignmentBlockWindow(block, blockWindows);
-      if (window.endHour <= window.startHour) {
+      if (window.endMinuteOfDay <= window.startMinuteOfDay) {
         continue;
       }
       for (
-        let hour = window.startHour;
-        hour + MANUAL_ASSIGNMENT_SLOT_MINUTES / 60 <= window.endHour;
-        hour += MANUAL_ASSIGNMENT_SLOT_MINUTES / 60
+        let minute = window.startMinuteOfDay;
+        minute + MANUAL_ASSIGNMENT_SLOT_MINUTES <= window.endMinuteOfDay;
+        minute += MANUAL_ASSIGNMENT_SLOT_MINUTES
       ) {
         const slotStart = new Date(day);
-        slotStart.setHours(hour, 0, 0, 0);
+        slotStart.setHours(Math.floor(minute / 60), minute % 60, 0, 0);
         const slotEnd = addMinutes(slotStart, MANUAL_ASSIGNMENT_SLOT_MINUTES);
 
         if (slotStart < now) {
@@ -7261,6 +7258,41 @@ export async function respondToSlotAsClient(input: {
               error: domainErrorMessage(error),
             }).catch(() => {}),
           )
+          .catch(() => {});
+
+        // Auto-issue ToC form PIN and send email so client can sign later
+        void issueFormPin({
+          caseId: confirmedContext.caseId,
+          participantIdentifier: clientEmail,
+          formType: "TERMS_AND_CONDITIONS",
+          formPath: "/forms/terms-and-conditions",
+        })
+          .then((tocPin) => {
+            void sendFormPinEmail({
+              to: clientEmail,
+              participantName: clientName,
+              formType: "TERMS_AND_CONDITIONS",
+              accessUrl: tocPin.accessUrl,
+              pin: tocPin.pin,
+              expiresAt: tocPin.expiresAt,
+              caseReference: confirmedContext.caseReference,
+            })
+              .then((emailResult) =>
+                logEmail({
+                  caseId: confirmedContext.caseId,
+                  clientId: confirmedContext.clientId ?? undefined,
+                  emailType: EmailType.FORM_PIN,
+                  recipientEmail: clientEmail,
+                  recipientName: clientName,
+                  subject: emailResult.subject,
+                  status: emailResult.delivered ? EmailStatus.SENT : EmailStatus.FAILED,
+                  providerMessageId: emailResult.providerMessageId,
+                  relatedFormType: "TERMS_AND_CONDITIONS",
+                  relatedFormAccessPinId: tocPin.pinId,
+                }),
+              )
+              .catch(() => {});
+          })
           .catch(() => {});
       }
 

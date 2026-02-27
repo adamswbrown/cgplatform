@@ -19,7 +19,6 @@ export default async function SpecialistAvailabilityPage() {
           { href: "/specialist/sessions", label: "My Sessions" },
           { href: "/specialist/reviews", label: "Pending Reviews" },
           { href: "/specialist/clients", label: "My Clients" },
-          { href: "/specialist/availability", label: "My Availability" },
         ]}
       >
         <p className="cg-alert cg-alert-error">
@@ -48,7 +47,6 @@ export default async function SpecialistAvailabilityPage() {
       navItems={[
         { href: "/specialist/sessions", label: "My Sessions" },
         { href: "/specialist/clients", label: "My Clients" },
-        { href: "/specialist/availability", label: "My Availability" },
       ]}
     >
       <SpecialistAvailabilityCalendar

@@ -39,12 +39,23 @@ export const LOCATION_OPTIONS = [
 
 export const TIME_PREFERENCE_OPTIONS = ["MORNING", "AFTERNOON", "EVENING"] as const;
 
+export const DAY_OPTIONS = [
+  "MONDAY",
+  "TUESDAY",
+  "WEDNESDAY",
+  "THURSDAY",
+  "FRIDAY",
+] as const;
+
+export const EVENING_ELIGIBLE_DAYS: ReadonlySet<string> = new Set(["TUESDAY", "THURSDAY"]);
+
 export const CONTACT_PREFERENCE_ROWS = [
   { key: "contactMainPhone", label: "May we contact you on your main phone number?" },
   { key: "leaveVoicemailMainPhone", label: "May we leave voicemail on your main phone number?" },
   { key: "contactSecondPhone", label: "May we contact you on your second phone number?" },
   { key: "leaveVoicemailSecondPhone", label: "May we leave voicemail on your second phone number?" },
   { key: "contactEmail", label: "May we contact you by email?" },
+  { key: "contactWhatsApp", label: "May we contact you via WhatsApp?" },
 ] as const;
 
 const yesNoSchema = z.enum(["yes", "no"]);
@@ -69,7 +80,7 @@ const secondaryParticipantSchema = z
 
 export const newIntakeApiSchema = z
   .object({
-    accessKey: z.string().trim().min(1),
+    accessKey: z.string().trim().min(1).optional().default(""),
     participantType: z.enum(["single", "couple"]),
     primary: z.object({
       title: z.string().trim().min(1).max(24),
@@ -96,6 +107,7 @@ export const newIntakeApiSchema = z
         contactSecondPhone: yesNoSchema,
         leaveVoicemailSecondPhone: yesNoSchema,
         contactEmail: yesNoSchema,
+        contactWhatsApp: yesNoSchema,
       }),
       emergencyContactFirstName: z.string().trim().min(1).max(120),
       emergencyContactLastName: z.string().trim().min(1).max(120),
@@ -126,8 +138,12 @@ export const newIntakeApiSchema = z
     availability: z.object({
       location: z.enum(LOCATION_OPTIONS),
       includeOnline: z.boolean().default(false),
-      notes: z.string().trim().min(1).max(1000),
-      timePreferences: z.array(z.enum(TIME_PREFERENCE_OPTIONS)).min(1).max(3),
+      notes: z.string().trim().max(1000).optional(),
+      dayTimeBlocks: z.array(z.object({
+        day: z.enum(DAY_OPTIONS),
+        block: z.enum(TIME_PREFERENCE_OPTIONS),
+      })).min(1),
+      timePreferences: z.array(z.enum(TIME_PREFERENCE_OPTIONS)).max(3).default([]),
       selectedSlots: z.array(availabilitySlotSchema).max(40).default([]),
     }),
     requestedDurationMinutes: z.number().int().positive().optional(),
