@@ -2,6 +2,7 @@ import Link from "next/link";
 import { UserRole } from "@prisma/client";
 import { logoutAction } from "@/app/actions";
 import { BrandWordmark } from "@/components/brand-wordmark";
+import { NotificationBell } from "@/components/notification-bell";
 
 type NavItem = {
   href: string;
@@ -33,6 +34,7 @@ const OPS_NAV_PRIORITY: string[] = [
 
 const SPECIALIST_NAV_PRIORITY: string[] = [
   "/specialist/sessions",
+  "/specialist/reviews",
   "/specialist/clients",
   "/specialist/availability",
 ];
@@ -284,6 +286,7 @@ export function AuthenticatedShell({
                   </div>
                 </div>
               </details>
+              <NotificationBell />
               <span className="cg-nav-label text-white/80">{userName}</span>
               <form action={logoutAction}>
                 <button type="submit" className="cg-cta-secondary px-4 py-2 text-xs text-white">

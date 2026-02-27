@@ -25,6 +25,7 @@ export default async function SpecialistClientsPage() {
       currentPath="/specialist/clients"
       navItems={[
         { href: "/specialist/sessions", label: "My Sessions" },
+        { href: "/specialist/reviews", label: "Pending Reviews" },
         { href: "/specialist/clients", label: "My Clients" },
         { href: "/specialist/availability", label: "My Availability" },
       ]}
