@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { BrandWordmark } from "@/components/brand-wordmark";
 import { db } from "@/lib/db";
+import { requireFormAccessOrRedirect } from "@/lib/form-access";
 import { formatDateTime } from "@/lib/format";
 import { SlotResponseForm } from "./slot-response-form";
 
@@ -11,9 +12,8 @@ type SlotResponsePageProps = {
 export default async function SlotResponsePage({ searchParams }: SlotResponsePageProps) {
   const query = await searchParams;
   const accessKey = typeof query.accessKey === "string" ? query.accessKey : "";
-  const caseId = typeof query.caseId === "string" ? query.caseId : "";
 
-  if (!accessKey || !caseId) {
+  if (!accessKey) {
     return (
       <main className="min-h-screen bg-[color:var(--cg-light-accent)] px-[var(--cg-gutter-mobile)] py-20 md:px-[var(--cg-gutter)]">
         <div className="mx-auto max-w-[520px] rounded-2xl bg-[color:var(--cg-white)] p-8 shadow-sm">
@@ -34,40 +34,17 @@ export default async function SlotResponsePage({ searchParams }: SlotResponsePag
     );
   }
 
-  // Validate access
-  const pin = await db.formAccessPin.findFirst({
-    where: {
-      caseId,
-      accessKey,
-      revokedAt: null,
-      expiresAt: { gt: new Date() },
-    },
-    include: {
-      client: { select: { firstName: true, lastName: true } },
-      case: { select: { reference: true } },
-    },
+  const nextPath = `/forms/slot-response?accessKey=${encodeURIComponent(accessKey)}`;
+  const session = await requireFormAccessOrRedirect({
+    accessKey,
+    formType: "SLOT_RESPONSE",
+    nextPath,
   });
-
-  if (!pin) {
-    return (
-      <main className="min-h-screen bg-[color:var(--cg-light-accent)] px-[var(--cg-gutter-mobile)] py-20 md:px-[var(--cg-gutter)]">
-        <div className="mx-auto max-w-[520px] rounded-2xl bg-[color:var(--cg-white)] p-8 shadow-sm">
-          <BrandWordmark className="mx-auto h-14 w-auto" />
-          <h1 className="mt-6 text-2xl font-bold text-[color:var(--cg-ink)]">
-            Access expired or invalid
-          </h1>
-          <p className="mt-2 text-sm text-[color:var(--muted)]">
-            This link may have expired. Please contact the office for assistance.
-          </p>
-        </div>
-      </main>
-    );
-  }
 
   // Find the active slot proposal
   const slot = await db.slotProposal.findFirst({
     where: {
-      caseId,
+      caseId: session.caseId,
       status: "PENDING_CLIENT",
     },
     include: {
@@ -102,10 +79,10 @@ export default async function SlotResponsePage({ searchParams }: SlotResponsePag
           Your Counselling Appointment
         </h1>
         <p className="mt-2 text-sm text-[color:var(--muted)]">
-          Case: <strong>{pin.case.reference}</strong>
+          Case: <strong>{session.caseReference}</strong>
         </p>
         <p className="text-sm text-[color:var(--muted)]">
-          {pin.client.firstName} {pin.client.lastName}
+          {session.participantName}
         </p>
 
         <div className="mt-6 rounded-xl border border-[color:var(--border)] bg-[color:var(--cg-light-accent)] p-4">
@@ -124,7 +101,7 @@ export default async function SlotResponsePage({ searchParams }: SlotResponsePag
         </div>
 
         <SlotResponseForm
-          caseId={caseId}
+          caseId={session.caseId}
           accessKey={accessKey}
           proposedStartTime={slot.proposedStartTime.toISOString()}
           proposedEndTime={slot.proposedEndTime.toISOString()}
