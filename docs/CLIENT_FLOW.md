@@ -5,23 +5,33 @@ This document describes the complete flow experienced by an end client (the pers
 ## High-Level Summary
 
 ```
-Ops issues invite ─► PIN verification ─► Intake form ─► Case created
+Ops issues invite ─► PIN verification ─► Intake form ─► Case created (AWAITING_REVIEW)
                                                              │
                               ┌────────────────────────────────┘
                               ▼
-                     Workflow forms (PIN-gated)
-                     ┌─ Consent Form
-                     ├─ Agreement Form
-                     └─ etc.
+                     Triage (admin + clinical review)
                               │
-                              ▼
-                     Specialist assigned & session booked
-                              │
-                              ▼
-                     Slot Response (accept/decline proposed time)
-                              │
-                              ▼
-                     Terms of Counselling (PIN-gated, required before IN_SESSION)
+                     ┌────────┴────────┐
+                     ▼                 ▼
+                  Approved          Declined ──► Case closed
+                     │
+                     ▼
+              ┌─ OPS RESPONSIBILITY ──────────────────────────────┐
+              │                                                    │
+              │  OPS proposes case to counsellor                   │
+              │       │                                            │
+              │       ├── Counsellor agrees ──► Client assigned    │
+              │       └── Counsellor declines ──► Back to pool ◄──┤
+              │                                    (OPS repropose) │
+              │  OPS proposes session time                         │
+              │       │                                            │
+              │       ├── Counsellor accepts ──► Sent to client    │
+              │       │       │                                    │
+              │       │       ├── Client accepts + ToC ──► Done    │
+              │       │       └── Client counter-proposes ◄────────┤
+              │       │                        (cycle back)        │
+              │       └── Counsellor declines ──► OPS reproposes   │
+              └────────────────────────────────────────────────────┘
                               │
                               ▼
                      Counselling sessions
@@ -152,9 +162,89 @@ Displays:
 - Crisis support contact information
 - Links to submit another intake or view case in ops portal
 
-### 5. PIN-Gated Follow-Up Forms
+### 5. OPS Review & Assignment (Admin Responsibility)
 
-After the case is created, Ops issues additional PIN-gated forms to the client as the case progresses. Each follows the same pattern:
+After intake submission the case sits in the **unassigned pool** with status `AWAITING_REVIEW`. Everything from this point forward is driven by admin/OPS.
+
+#### 5a. Triage
+
+OPS performs triage on the submitted intake. There are two dimensions of triage:
+
+| Type | Purpose |
+|------|---------|
+| **Admin triage** | Checks the form is complete, contact details are valid, no duplicates |
+| **Clinical triage** | Reviews the presenting issue, flags safeguarding concerns, assesses suitability |
+
+**Triage outcomes:**
+- **Approved** — case moves to `MATCHED` status, ready for counsellor assignment
+- **Flagged** — case moves to `MATCHED` with a flag note attached (e.g. safeguarding concern)
+- **Declined** — case moves to `CLOSED` with a reason recorded
+
+```
+Case (AWAITING_REVIEW)
+       │
+       ▼
+  OPS reviews intake
+       │
+       ├── Approved ──► Status: MATCHED
+       ├── Flagged  ──► Status: MATCHED (with flag)
+       └── Declined ──► Status: CLOSED
+```
+
+#### 5b. Proposing Case to Counsellor
+
+Once a case is in `MATCHED` status, OPS selects a suitable counsellor and proposes the case to them. The counsellor receives a copy of the application so they can review it before deciding.
+
+```
+OPS proposes case to counsellor
+       │
+       ├── Counsellor receives:
+       │     • In-app notification
+       │     • Email with case details
+       │     • Access to intake summary in portal
+       │
+       ▼
+  Status: COUNSELLOR_PROPOSED
+       │
+       ├── Counsellor ACCEPTS ──► Status: COUNSELLOR_ACCEPTED
+       │                           (specialist confirmed on case)
+       │
+       └── Counsellor DECLINES ──► Status: MATCHED
+                                    (back to unassigned pool;
+                                     OPS proposes to another counsellor)
+```
+
+#### 5c. Proposing a Session Time
+
+After the counsellor accepts, **OPS proposes a session time** to the counsellor first, then to the client.
+
+```
+OPS proposes session time
+       │
+       ▼
+  Status: SLOT_PROPOSED
+       │
+       ├── Counsellor ACCEPTS ──► Slot forwarded to client
+       │       │
+       │       ├── Client ACCEPTS + ToC agreed ──► Status: SLOT_CONFIRMED
+       │       │     (counsellor receives confirmation ONLY after
+       │       │      client confirms AND Terms of Counselling accepted)
+       │       │
+       │       └── Client COUNTER-PROPOSES ──► New slot created
+       │             (alternative time sent back to counsellor,
+       │              cycle repeats)
+       │
+       └── Counsellor DECLINES ──► Status: COUNSELLOR_ACCEPTED
+             (OPS proposes / reproposes a new session time)
+```
+
+**Key rule:** The counsellor only receives final appointment confirmation once the client has both accepted the slot AND agreed to the Terms of Counselling.
+
+---
+
+### 6. PIN-Gated Follow-Up Forms (Admin Responsibility)
+
+As the case progresses, OPS issues additional PIN-gated forms to the client. Each follows the same pattern:
 
 ```
 Ops issues PIN for form type
@@ -184,7 +274,7 @@ Each form page calls `requireFormAccessOrRedirect()` which:
 2. Verifies the formType matches
 3. If invalid, redirects back to PIN entry at `/forms/access/:accessKey`
 
-#### 5a. Terms of Counselling
+#### 6a. Terms of Counselling
 
 **Route:** `/forms/terms-and-conditions?accessKey=...`
 **Form type:** `TERMS_AND_CONDITIONS`
@@ -198,7 +288,7 @@ Displays full legal terms text, then requires:
 
 Submits to `POST /forms/submission` with form type and metadata.
 
-#### 5b. Consent Form
+#### 6b. Consent Form
 
 **Route:** `/forms/consent?accessKey=...`
 **Form type:** `CONSENT_FORM`
@@ -206,7 +296,7 @@ Submits to `POST /forms/submission` with form type and metadata.
 - Confirmation checkbox ("I give informed consent...")
 - Consent details (required text field)
 
-#### 5c. Agreement Form
+#### 6c. Agreement Form
 
 **Route:** `/forms/agreement?accessKey=...`
 **Form type:** `AGREEMENT_FORM`
@@ -214,7 +304,7 @@ Submits to `POST /forms/submission` with form type and metadata.
 - Confirmation checkbox ("I confirm I have read and accept...")
 - Agreement notes (optional text field)
 
-#### 5d. Outtake Form
+#### 6d. Outtake Form
 
 **Route:** `/forms/outtake?accessKey=...`
 **Form type:** `OUTTAKE_FORM`
@@ -223,7 +313,7 @@ Submits to `POST /forms/submission` with form type and metadata.
 - Confirmation checkbox
 - Outtake feedback (required text field)
 
-#### 5e. Slot Response
+#### 6e. Slot Response
 
 **Route:** `/forms/slot-response?accessKey=...`
 **Form type:** `SLOT_RESPONSE`
@@ -234,7 +324,7 @@ Displays a proposed appointment with:
 
 Client can **accept** or **decline** the proposed slot.
 
-### 6. Form Submission Flow (All PIN-Gated Forms)
+### 7. Form Submission Flow (All PIN-Gated Forms)
 
 ```
 Client fills in form and submits
@@ -275,7 +365,21 @@ flowchart TD
     K["POST /api/intake<br/>Submit application"]
     L["/intake/success<br/>Case CASE-XXXX created<br/>Status: AWAITING_REVIEW"]
 
-    M["--- OPS REVIEW & ASSIGNMENT ---"]
+    subgraph OPS["OPS RESPONSIBILITY (Admin-driven)"]
+        direction TB
+        M1["Triage: admin + clinical review"]
+        M2{"Triage outcome?"}
+        M3["Case CLOSED<br/>(declined)"]
+        M4["Status: MATCHED<br/>(in unassigned pool)"]
+        M5["OPS proposes case<br/>to counsellor"]
+        M6{"Counsellor<br/>agrees?"}
+        M7["Status: COUNSELLOR_ACCEPTED"]
+        M8["OPS proposes<br/>session time"]
+        M9{"Counsellor<br/>accepts slot?"}
+        M10{"Client accepts<br/>+ ToC agreed?"}
+        M11["Status: SLOT_CONFIRMED<br/>Counsellor gets confirmation"]
+        M12["Client counter-proposes<br/>(new slot to counsellor)"]
+    end
 
     N["Client receives email with<br/>form link + PIN"]
     O["/forms/access/:accessKey<br/>PIN Entry Screen"]
@@ -301,9 +405,18 @@ flowchart TD
     H -- Yes --> I --> G
     H -- No --> J --> K --> L
 
-    L -.-> M
+    L -.-> M1 --> M2
+    M2 -- Declined --> M3
+    M2 -- Approved/Flagged --> M4
+    M4 --> M5 --> M6
+    M6 -- No --> M4
+    M6 -- Yes --> M7 --> M8 --> M9
+    M9 -- No --> M8
+    M9 -- Yes --> M10
+    M10 -- "Accept + ToC" --> M11
+    M10 -- Counter-propose --> M12 --> M9
 
-    M -.-> N --> O --> P
+    M11 -.-> N --> O --> P
     P -- No --> D
     P -- Yes --> Q --> R
 
