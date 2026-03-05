@@ -4,6 +4,7 @@ import { IntakeMultiStepForm } from "@/components/intake/intake-multi-step-form"
 import { requireIntakeAccessOrRedirect } from "@/lib/form-access";
 import { getIntakeFormContent } from "@/lib/intake-settings";
 import { getSchedulingAssignmentMode } from "@/lib/scheduling/config";
+import { getOperationalSettings } from "@/lib/admin-settings";
 
 type IntakePageProps = {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
@@ -16,8 +17,10 @@ export default async function IntakePage({ searchParams }: IntakePageProps) {
   const accessKey = typeof params.accessKey === "string" ? params.accessKey : "";
   const content = await getIntakeFormContent();
   const assignmentMode = await getSchedulingAssignmentMode();
+  const operationalSettings = await getOperationalSettings();
+  const isPublicAccess = operationalSettings.allowPublicIntake;
 
-  if (!accessKey) {
+  if (!isPublicAccess && !accessKey) {
     return (
       <div className="min-h-screen">
         <section className="cg-section cg-shell-hero cg-theme-dark-bold">
@@ -61,10 +64,12 @@ export default async function IntakePage({ searchParams }: IntakePageProps) {
     );
   }
 
-  await requireIntakeAccessOrRedirect({
-    accessKey,
-    nextPath: `/intake?accessKey=${encodeURIComponent(accessKey)}`,
-  });
+  if (accessKey) {
+    await requireIntakeAccessOrRedirect({
+      accessKey,
+      nextPath: `/intake?accessKey=${encodeURIComponent(accessKey)}`,
+    });
+  }
 
   return (
     <div className="min-h-screen">

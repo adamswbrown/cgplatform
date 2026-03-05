@@ -395,6 +395,27 @@ export default async function OperationalSettingsPage({
             </div>
           </div>
 
+          <h2 className="text-lg font-semibold text-[color:var(--cg-ink)]">
+            Intake Access
+          </h2>
+          <div className="grid gap-4 md:grid-cols-2">
+            <label className="flex items-start gap-3 rounded-xl border border-slate-200 bg-white px-3 py-3 text-sm">
+              <input
+                id="allowPublicIntake"
+                name="allowPublicIntake"
+                type="checkbox"
+                defaultChecked={settings.allowPublicIntake}
+                className="mt-0.5 h-4 w-4"
+              />
+              <span>
+                <strong>Allow public intake form access</strong>
+                <br />
+                When enabled, anyone can access the intake form at <code>/intake</code> without a
+                secure link or PIN. When disabled, ops must issue a secure link first.
+              </span>
+            </label>
+          </div>
+
           <h3 className="pt-2 text-base font-semibold text-[color:var(--cg-ink)]">
             Form Access Policy
           </h3>

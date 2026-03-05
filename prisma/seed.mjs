@@ -2,7 +2,8 @@ import bcrypt from "bcryptjs";
 import { createHash } from "crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
-import { PrismaClient, CaseStatus, DocumentState, SessionStatus, UserRole } from "@prisma/client";
+import { randomBytes } from "crypto";
+import { PrismaClient, CaseStatus, CaseProposalStatus, SessionTimeProposalStatus, DocumentState, SessionStatus, UserRole } from "@prisma/client";
 
 const prisma = new PrismaClient();
 const USER_SEED_FILE = path.join(process.cwd(), "prisma", "seed.user.json");
@@ -462,6 +463,51 @@ async function applyUserSeedConfig(input) {
       }
     }
 
+    // Seed case proposals (counsellor check-in)
+    if (caseSeed.caseProposal && typeof caseSeed.caseProposal === "object") {
+      const proposalSpecialist = caseSeed.caseProposal.specialistEmail
+        ? specialistsByEmail.get(normalizeEmail(caseSeed.caseProposal.specialistEmail))
+        : assignedSpecialist;
+      if (proposalSpecialist) {
+        await prisma.caseProposal.create({
+          data: {
+            caseId: caseRecord.id,
+            specialistId: proposalSpecialist.id,
+            proposedByUserId: opsUser.id,
+            status: String(caseSeed.caseProposal.status || "PENDING").toUpperCase(),
+            proposalNote: caseSeed.caseProposal.notes || null,
+          },
+        });
+      }
+    }
+
+    // Seed session time proposals
+    if (Array.isArray(caseSeed.sessionTimeProposals)) {
+      const proposalSpecialist = assignedSpecialist;
+      if (proposalSpecialist) {
+        for (const slotSeed of caseSeed.sessionTimeProposals) {
+          const slotStart = parseDateOrDefault(slotSeed.startTime, addDays(now, 5));
+          let slotEnd = parseDateOrDefault(slotSeed.endTime, addHours(slotStart, 1));
+          if (slotEnd <= slotStart) slotEnd = addHours(slotStart, 1);
+          const status = String(slotSeed.status || "PENDING").toUpperCase();
+          await prisma.sessionTimeProposal.create({
+            data: {
+              caseId: caseRecord.id,
+              specialistId: proposalSpecialist.id,
+              proposedByUserId: opsUser.id,
+              proposedStartTime: slotStart,
+              proposedEndTime: slotEnd,
+              status,
+              confirmToken: randomBytes(32).toString("hex"),
+              specialistNotes: slotSeed.specialistNotes || null,
+              specialistRespondedAt: status !== "PENDING" ? now : null,
+              clientConfirmedAt: status === "CLIENT_CONFIRMED" ? now : null,
+            },
+          });
+        }
+      }
+    }
+
     if (Array.isArray(caseSeed.pins)) {
       for (const pinSeed of caseSeed.pins) {
         await createPinRecord({
@@ -544,8 +590,11 @@ async function main() {
   await prisma.authSession.deleteMany();
   await prisma.systemSetting.deleteMany();
   await prisma.auditLog.deleteMany();
+  await prisma.emailLog.deleteMany();
   await prisma.formAccessPin.deleteMany();
   await prisma.intakeAccessInvite.deleteMany();
+  await prisma.sessionTimeProposal.deleteMany();
+  await prisma.caseProposal.deleteMany();
   await prisma.documentInstance.deleteMany();
   await prisma.session.deleteMany();
   await prisma.specialistAvailabilityWindow.deleteMany();

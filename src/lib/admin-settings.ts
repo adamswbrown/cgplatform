@@ -28,6 +28,7 @@ export type OperationalSettings = {
   defaultIntakeInviteExpiresHours: number;
   defaultIntakeInviteMaxAttempts: number;
   formAccessSessionHours: number;
+  allowPublicIntake: boolean;
   specialistAvailabilityDefaultGridDays: number;
   specialistAvailabilityMaxGridDays: number;
 };
@@ -54,6 +55,7 @@ const DEFAULT_OPERATIONAL_SETTINGS: OperationalSettings = {
   defaultIntakeInviteExpiresHours: 72,
   defaultIntakeInviteMaxAttempts: 5,
   formAccessSessionHours: 8,
+  allowPublicIntake: false,
   specialistAvailabilityDefaultGridDays: 14,
   specialistAvailabilityMaxGridDays: 62,
 };
@@ -338,6 +340,10 @@ function normalizeOperationalSettings(candidate: unknown): OperationalSettings {
       DEFAULT_OPERATIONAL_SETTINGS.formAccessSessionHours,
       1,
       24,
+    ),
+    allowPublicIntake: normalizeBoolean(
+      parsed.allowPublicIntake,
+      DEFAULT_OPERATIONAL_SETTINGS.allowPublicIntake,
     ),
     specialistAvailabilityDefaultGridDays,
     specialistAvailabilityMaxGridDays,

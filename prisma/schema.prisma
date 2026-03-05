@@ -18,14 +18,22 @@ enum CaseStatus {
   MATCHED
   COUNSELLOR_PROPOSED
   COUNSELLOR_ACCEPTED
-  SLOT_PROPOSED
-  SLOT_CONFIRMED
   AGREEMENT_PENDING
   READY_TO_SCHEDULE
+  SLOT_PROPOSED
+  SLOT_CONFIRMED
   SCHEDULED
   IN_SESSION
   COMPLETED
   CLOSED
+}
+
+enum SessionTimeProposalStatus {
+  PENDING
+  SPECIALIST_ACCEPTED
+  SPECIALIST_DECLINED
+  CLIENT_CONFIRMED
+  WITHDRAWN
 }
 
 enum SessionStatus {
@@ -117,6 +125,7 @@ model Case {
   formAccessPins       FormAccessPin[]
   emailLogs            EmailLog[]
   auditLogs            AuditLog[]
+  sessionTimeProposals SessionTimeProposal[]
   triageRecords        TriageRecord[]
   caseProposals        CaseProposal[]
   slotProposals        SlotProposal[]
@@ -184,6 +193,7 @@ model Specialist {
   sessions                  Session[]
   assignedCases             Case[]       @relation("CaseAssignedSpecialist")
   availabilityWindows       SpecialistAvailabilityWindow[]
+  sessionTimeProposals      SessionTimeProposal[]
   caseProposals             CaseProposal[]
   slotProposals             SlotProposal[]
   userAccount               UserAccount?
@@ -212,6 +222,28 @@ model Session {
   @@index([specialistId, providerStartTime])
   @@index([caseId, providerStartTime])
   @@index([providerStartTime])
+}
+
+model SessionTimeProposal {
+  id                  String                    @id @default(cuid())
+  caseId              String
+  specialistId        String
+  proposedByUserId    String?
+  proposedStartTime   DateTime
+  proposedEndTime     DateTime
+  status              SessionTimeProposalStatus @default(PENDING)
+  confirmToken        String?                   @unique
+  specialistNotes     String?
+  specialistRespondedAt DateTime?
+  clientConfirmedAt   DateTime?
+  case                Case                      @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  specialist          Specialist                @relation(fields: [specialistId], references: [id], onDelete: Restrict)
+  proposedBy          UserAccount?              @relation("SessionTimeProposalIssuer", fields: [proposedByUserId], references: [id], onDelete: SetNull)
+  createdAt           DateTime                  @default(now())
+  updatedAt           DateTime                  @updatedAt
+
+  @@index([caseId, status])
+  @@index([specialistId, status])
 }
 
 model DocumentTemplate {
@@ -327,6 +359,7 @@ model UserAccount {
   issuedFormAccessPins FormAccessPin[] @relation("FormAccessPinIssuer")
   issuedIntakeAccessInvites IntakeAccessInvite[] @relation("IntakeAccessInviteIssuer")
   managedSpecialistAvailabilityWindows SpecialistAvailabilityWindow[] @relation("SpecialistAvailabilityUpdatedBy")
+  issuedSessionTimeProposals SessionTimeProposal[] @relation("SessionTimeProposalIssuer")
   notifications              Notification[]
   proposedCaseProposals      CaseProposal[]   @relation("CaseProposalProposedBy")
   proposedSlotProposals      SlotProposal[]   @relation("SlotProposalProposedBy")
@@ -422,6 +455,11 @@ enum EmailType {
   INTAKE_CONFIRMATION
   FORM_PIN
   INTAKE_ACCESS_INVITE
+  CASE_PROPOSAL
+  SESSION_TIME_PROPOSAL
+  SESSION_TIME_CONFIRMATION
+  CASE_DECLINED
+  CASE_STATUS_UPDATE
   CASE_PROPOSAL_TO_COUNSELLOR
   CASE_PROPOSAL_RESPONSE
   SLOT_PROPOSAL_TO_COUNSELLOR
@@ -520,6 +558,7 @@ enum CaseProposalStatus {
   PENDING
   ACCEPTED
   DECLINED
+  WITHDRAWN
   EXPIRED
   CANCELLED
 }
@@ -571,6 +610,7 @@ model CaseProposal {
   status           CaseProposalStatus @default(PENDING)
   proposedByUserId String?
   proposalNote     String?
+  declineReason    String?
   responseNote     String?
   respondedAt      DateTime?
   expiresAt        DateTime?

@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { UserRole } from "@prisma/client";
 import { z } from "zod";
 import { requireApiUser } from "@/lib/auth";
-import { domainErrorMessage, isDomainError, respondToCaseProposal, getActiveCaseProposal } from "@/lib/case-service";
+import { domainErrorMessage, isDomainError, respondToCaseProposalAsCounsellor, getActiveCaseProposal } from "@/lib/case-service";
 
 const respondSchema = z.object({
   accept: z.boolean(),
@@ -31,7 +31,7 @@ export async function POST(request: Request, context: RouteContext) {
       );
     }
 
-    const result = await respondToCaseProposal({
+    const result = await respondToCaseProposalAsCounsellor({
       proposalId: proposal.id,
       accept: payload.accept,
       responseNote: payload.responseNote,
