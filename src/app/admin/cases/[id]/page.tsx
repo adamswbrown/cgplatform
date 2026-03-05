@@ -8,12 +8,18 @@ import {
   issueFormPinAction,
   revokeFormPinAction,
   overrideAssignmentAction,
+  proposeCaseAction,
   transitionCaseAction,
   updateCaseIntakeReviewNotesAction,
 } from "@/app/actions";
 import { AuthenticatedShell } from "@/components/authenticated-shell";
 import { FormPinRoutingFields } from "@/components/forms/form-pin-routing-fields";
+import { CaseProposalForm } from "@/components/admin/case-proposal-form";
+import { SessionTimeProposalForm } from "@/components/admin/session-time-proposal-form";
+import { IntakeDataDisplay } from "@/components/admin/intake-data-display";
+import { IntakeReviewDecision } from "@/components/admin/intake-review-decision";
 import { requirePageUser } from "@/lib/auth";
+import { db } from "@/lib/db";
 import { getOperationalSettings } from "@/lib/admin-settings";
 import {
   getCaseDetails,
@@ -733,6 +739,13 @@ export default async function CaseDetailPage({ params, searchParams }: CaseDetai
     : null;
   const assignmentMode = specialistAvailability?.assignmentMode ?? "manual";
 
+  const sessionTimeProposals = assignmentPanelActive
+    ? await db.sessionTimeProposal.findMany({
+        where: { caseId: caseItem.id },
+        orderBy: { proposedStartTime: "asc" },
+      })
+    : [];
+
   const transitionOptions = CASE_TRANSITIONS[caseItem.status];
   const error = typeof query.error === "string" ? query.error : null;
   const pinIssued = query.pinIssued === "1";
@@ -983,44 +996,66 @@ export default async function CaseDetailPage({ params, searchParams }: CaseDetai
             </button>
           </form>
 
-          <form action={transitionCaseAction} className="rounded-2xl border border-[color:var(--border)] bg-[color:var(--surface)] p-4 shadow-sm xl:order-1 xl:col-span-3">
-            <h3 className="text-sm font-semibold">Transition status</h3>
-            <input type="hidden" name="caseId" value={caseItem.id} />
-            <input type="hidden" name="redirectTo" value={redirectTo} />
+          {caseItem.status === "AWAITING_REVIEW" ? (
+            <>
+              <IntakeDataDisplay
+                intakeFormData={caseItem.intakeFormData as Record<string, unknown> | null}
+                intakeReceivedAt={caseItem.intakeReceivedAt}
+                intakeSource={caseItem.intakeSource}
+                participants={caseItem.participants.map((p) => ({
+                  role: p.role,
+                  client: {
+                    firstName: p.client.firstName,
+                    lastName: p.client.lastName,
+                    email: p.client.email,
+                    phone: p.client.phone,
+                  },
+                }))}
+                notes={caseItem.notes}
+                flags={caseItem.flags}
+              />
+              <IntakeReviewDecision caseId={caseItem.id} redirectTo={redirectTo} />
+            </>
+          ) : (
+            <form action={transitionCaseAction} className="rounded-2xl border border-[color:var(--border)] bg-[color:var(--surface)] p-4 shadow-sm xl:order-1 xl:col-span-3">
+              <h3 className="text-sm font-semibold">Transition status</h3>
+              <input type="hidden" name="caseId" value={caseItem.id} />
+              <input type="hidden" name="redirectTo" value={redirectTo} />
 
-            <label htmlFor="targetStatus" className="mt-2 block text-xs font-medium text-[color:var(--muted)]">
-              Next status
-            </label>
-            <select
-              id="targetStatus"
-              name="targetStatus"
-              required
-              className="mt-1 w-full rounded-md border border-[color:var(--border)] px-2 py-2 text-sm"
-            >
-              <option value="">Select...</option>
-              {transitionOptions.map((option) => (
-                <option key={option} value={option}>
-                  {formatStatus(option)}
-                </option>
-              ))}
-            </select>
+              <label htmlFor="targetStatus" className="mt-2 block text-xs font-medium text-[color:var(--muted)]">
+                Next status
+              </label>
+              <select
+                id="targetStatus"
+                name="targetStatus"
+                required
+                className="mt-1 w-full rounded-md border border-[color:var(--border)] px-2 py-2 text-sm"
+              >
+                <option value="">Select...</option>
+                {transitionOptions.map((option) => (
+                  <option key={option} value={option}>
+                    {formatStatus(option)}
+                  </option>
+                ))}
+              </select>
 
-            <label htmlFor="reason" className="mt-2 block text-xs font-medium text-[color:var(--muted)]">
-              Reason (optional)
-            </label>
-            <input
-              id="reason"
-              name="reason"
-              className="mt-1 w-full rounded-md border border-[color:var(--border)] px-2 py-2 text-sm"
-            />
+              <label htmlFor="reason" className="mt-2 block text-xs font-medium text-[color:var(--muted)]">
+                Reason (optional)
+              </label>
+              <input
+                id="reason"
+                name="reason"
+                className="mt-1 w-full rounded-md border border-[color:var(--border)] px-2 py-2 text-sm"
+              />
 
-            <button
-              type="submit"
-              className="mt-3 rounded-md border border-[color:var(--border)] px-3 py-2 text-xs font-semibold hover:bg-[color:var(--accent-soft)]"
-            >
-              Apply transition
-            </button>
-          </form>
+              <button
+                type="submit"
+                className="mt-3 rounded-md border border-[color:var(--border)] px-3 py-2 text-xs font-semibold hover:bg-[color:var(--accent-soft)]"
+              >
+                Apply transition
+              </button>
+            </form>
+          )}
 
           <div className="rounded-2xl border border-[color:var(--border)] bg-[color:var(--surface)] p-4 shadow-sm xl:order-3 xl:col-span-12">
             <h3 className="text-sm font-semibold">Workflow assignment</h3>
@@ -1253,6 +1288,105 @@ export default async function CaseDetailPage({ params, searchParams }: CaseDetai
               </ul>
             )}
           </div>
+
+          {(caseItem.status === "MATCHED" || caseItem.status === "COUNSELLOR_PROPOSED") && (
+            <CaseProposalForm
+              caseId={caseItem.id}
+              redirectTo={redirectTo}
+              specialists={specialists}
+            />
+          )}
+
+          {(caseItem.status === "READY_TO_SCHEDULE" || caseItem.status === "SLOT_PROPOSED") &&
+            caseItem.assignedSpecialist && (
+              <SessionTimeProposalForm
+                caseId={caseItem.id}
+                specialistId={caseItem.assignedSpecialist.id}
+                specialistName={caseItem.assignedSpecialist.name}
+                redirectTo={redirectTo}
+              />
+            )}
+
+          {caseItem.status === "SLOT_PROPOSED" && sessionTimeProposals.length > 0 && (
+            <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 shadow-sm xl:order-3 xl:col-span-6">
+              <h3 className="text-sm font-semibold text-amber-900">
+                Pending Session Time Proposals ({sessionTimeProposals.filter((p) => p.status === "PENDING").length})
+              </h3>
+              <p className="mt-1 text-xs text-amber-700">
+                Waiting for counsellor to review and respond to proposed times.
+              </p>
+              <div className="mt-3 space-y-2">
+                {sessionTimeProposals.map((proposal) => (
+                  <div
+                    key={proposal.id}
+                    className={`rounded-lg border p-3 ${
+                      proposal.status === "PENDING"
+                        ? "border-amber-200 bg-white"
+                        : proposal.status === "SPECIALIST_ACCEPTED"
+                          ? "border-emerald-200 bg-emerald-50"
+                          : proposal.status === "SPECIALIST_DECLINED"
+                            ? "border-red-200 bg-red-50"
+                            : "border-[color:var(--border)] bg-white"
+                    }`}
+                  >
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <p className="text-sm font-medium">
+                        {formatDateTime(proposal.proposedStartTime)} &ndash; {formatDateTime(proposal.proposedEndTime)}
+                      </p>
+                      <span
+                        className={`rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider ${
+                          proposal.status === "PENDING"
+                            ? "bg-amber-100 text-amber-800"
+                            : proposal.status === "SPECIALIST_ACCEPTED"
+                              ? "bg-emerald-100 text-emerald-800"
+                              : proposal.status === "SPECIALIST_DECLINED"
+                                ? "bg-red-100 text-red-800"
+                                : "bg-gray-100 text-gray-600"
+                        }`}
+                      >
+                        {formatStatus(proposal.status)}
+                      </span>
+                    </div>
+                    {proposal.specialistNotes && (
+                      <p className="mt-2 text-xs text-[color:var(--muted)]">
+                        Counsellor notes: {proposal.specialistNotes}
+                      </p>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {caseItem.status === "SLOT_CONFIRMED" && sessionTimeProposals.length > 0 && (
+            <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-4 shadow-sm xl:order-3 xl:col-span-6">
+              <h3 className="text-sm font-semibold text-emerald-900">
+                Confirmed Session Time
+              </h3>
+              <div className="mt-3 space-y-2">
+                {sessionTimeProposals
+                  .filter((p) => p.status === "SPECIALIST_ACCEPTED" || p.status === "CLIENT_CONFIRMED")
+                  .map((proposal) => (
+                    <div
+                      key={proposal.id}
+                      className="rounded-lg border border-emerald-200 bg-white p-3"
+                    >
+                      <p className="text-sm font-medium">
+                        {formatDateTime(proposal.proposedStartTime)} &ndash; {formatDateTime(proposal.proposedEndTime)}
+                      </p>
+                      <span className="mt-1 inline-block rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-emerald-800">
+                        Confirmed
+                      </span>
+                      {proposal.specialistNotes && (
+                        <p className="mt-2 text-xs text-[color:var(--muted)]">
+                          Counsellor notes: {proposal.specialistNotes}
+                        </p>
+                      )}
+                    </div>
+                  ))}
+              </div>
+            </div>
+          )}
         </section>
       ) : null}
 
@@ -1271,12 +1405,6 @@ export default async function CaseDetailPage({ params, searchParams }: CaseDetai
               {caseItem.intakeReceivedAt ? ` • Received: ${formatDateTime(caseItem.intakeReceivedAt)}` : ""}
             </p>
           </div>
-
-          {intakeNotesSaved ? (
-            <p className="cg-alert cg-alert-success mt-3">
-              Intake review notes saved.
-            </p>
-          ) : null}
 
           <div className="mt-3 flex flex-wrap gap-2">
             <span className="rounded-full border border-[color:var(--border)] bg-white px-3 py-1 text-xs font-semibold">
@@ -1519,12 +1647,31 @@ export default async function CaseDetailPage({ params, searchParams }: CaseDetai
                 placeholder="Add review summary, risk observations, and next actions..."
                 className="mt-2 w-full rounded-md border border-[color:var(--border)] px-3 py-2 text-sm"
               />
-              <button
-                type="submit"
-                className="mt-2 rounded-md border border-[color:var(--border)] px-3 py-2 text-xs font-semibold uppercase tracking-wide hover:bg-[color:var(--accent-soft)]"
-              >
-                Save Intake Notes
-              </button>
+              <div className="mt-2 flex items-center gap-2">
+                <button
+                  type="submit"
+                  className="rounded-md border border-[color:var(--border)] px-3 py-2 text-xs font-semibold uppercase tracking-wide hover:bg-[color:var(--accent-soft)]"
+                >
+                  Save Intake Notes
+                </button>
+                {intakeNotesSaved ? (
+                  <span
+                    className="text-xs font-semibold text-emerald-600"
+                    style={{
+                      animation: "intakeNotesFade 3s ease-in-out forwards",
+                    }}
+                  >
+                    Notes saved
+                  </span>
+                ) : null}
+              </div>
+              <style>{`
+                @keyframes intakeNotesFade {
+                  0% { opacity: 1; }
+                  70% { opacity: 1; }
+                  100% { opacity: 0; }
+                }
+              `}</style>
             </form>
           </div>
 

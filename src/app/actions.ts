@@ -9,6 +9,7 @@ import {
   allocateCaseAutomatically,
   assignWorkflowTemplateToCase,
   canUserOverride,
+  clientConfirmSessionTime,
   completeDocumentInstance,
   createWorkflowTemplate,
   createWorkflowTemplateFromPreset,
@@ -17,6 +18,10 @@ import {
   domainErrorMessage,
   isDomainError,
   overrideCaseAssignment,
+  proposeCaseToSpecialist,
+  proposeSessionTimes,
+  respondToCaseProposal,
+  respondToSessionTimeProposal,
   transitionCaseStatus,
   updateCaseIntakeReviewNotes,
   updateSpecialistProfile,
@@ -34,10 +39,20 @@ import {
   normalizeSchedulingEngineType,
   updateOperationalSettings,
 } from "@/lib/admin-settings";
+import { db } from "@/lib/db";
 import { issueFormPin, issueIntakeAccessInvite, revokeFormPin } from "@/lib/form-access";
 import { updateIntakeFormContent } from "@/lib/intake-settings";
 import { updateIntegrationSettings } from "@/lib/integration-settings";
-import { logEmail, sendFormPinEmail, sendIntakeAccessInviteEmail } from "@/lib/mailer";
+import {
+  logEmail,
+  sendCaseDeclinedEmail,
+  sendCaseProposalEmail,
+  sendCaseStatusUpdateEmail,
+  sendFormPinEmail,
+  sendIntakeAccessInviteEmail,
+  sendSessionTimeClientConfirmEmail,
+  sendSessionTimeProposalEmail,
+} from "@/lib/mailer";
 
 const intakeSchema = z
   .object({
@@ -244,6 +259,20 @@ export async function transitionCaseAction(formData: FormData) {
     redirect(encodeErrorPath(redirectTo, "Invalid target status."));
   }
 
+  // Fetch current status and primary participant before transitioning
+  const caseRecord = await db.case.findUnique({
+    where: { id: caseId },
+    select: {
+      status: true,
+      reference: true,
+      participants: {
+        where: { role: "PRIMARY" },
+        select: { client: { select: { firstName: true, lastName: true, email: true } } },
+        take: 1,
+      },
+    },
+  });
+
   try {
     await transitionCaseStatus({
       caseId,
@@ -251,6 +280,25 @@ export async function transitionCaseAction(formData: FormData) {
       reason,
       actorUserId: user.id,
     });
+
+    // Send decline email when closing from AWAITING_REVIEW
+    if (
+      targetStatus === CaseStatus.CLOSED &&
+      caseRecord?.status === CaseStatus.AWAITING_REVIEW
+    ) {
+      const primaryParticipant = caseRecord.participants[0]?.client;
+      if (primaryParticipant) {
+        sendCaseDeclinedEmail({
+          recipientEmail: primaryParticipant.email,
+          recipientName: `${primaryParticipant.firstName} ${primaryParticipant.lastName}`,
+          caseReference: caseRecord.reference,
+          caseId,
+          reason: reason || null,
+        }).catch((err) => {
+          console.error("[transitionCaseAction] Failed to send case declined email:", err);
+        });
+      }
+    }
 
     revalidatePath("/admin/cases");
     revalidatePath(redirectTo);
@@ -804,6 +852,8 @@ export async function updateOperationalSettingsAction(formData: FormData) {
           String(formData.get("requireTermsBeforeInSession") || "") === "on",
         requireOuttakeBeforeClose:
           String(formData.get("requireOuttakeBeforeClose") || "") === "on",
+        allowPublicIntake:
+          String(formData.get("allowPublicIntake") || "") === "on",
         defaultIndividualSessionMinutes: parsePositiveIntegerField(
           formData,
           "defaultIndividualSessionMinutes",
@@ -1395,6 +1445,241 @@ export async function updateWorkflowStepAction(formData: FormData) {
     });
 
     revalidatePath("/admin/workflows");
+    revalidatePath("/admin/cases");
+    redirect(redirectTo);
+  } catch (error) {
+    redirectWithActionError(redirectTo, error);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Case Proposal actions
+// ---------------------------------------------------------------------------
+
+export async function proposeCaseAction(formData: FormData) {
+  const user = await requirePageUser([UserRole.OPS]);
+  const caseId = String(formData.get("caseId") || "");
+  const specialistId = String(formData.get("specialistId") || "");
+  const proposalNote = String(formData.get("proposalNote") || "");
+  const redirectTo = String(formData.get("redirectTo") || "/admin/cases");
+
+  if (!caseId || !specialistId) {
+    redirect(encodeErrorPath(redirectTo, "Case and specialist are required."));
+  }
+
+  try {
+    const result = await proposeCaseToSpecialist({
+      caseId,
+      specialistId,
+      proposalNote,
+      actorUserId: user.id,
+    });
+
+    // Fire-and-forget: don't block the redirect on email delivery
+    sendCaseProposalEmail({
+      recipientEmail: result.specialistEmail,
+      recipientName: result.specialistName,
+      caseReference: result.caseReference,
+      caseId: result.caseId,
+      counsellingType: result.counsellingType,
+      proposalNote: proposalNote?.trim() || null,
+      proposedByName: user.name,
+      participantSummary: result.participantSummary,
+      proposalId: result.proposalId,
+    }).catch((err) => {
+      console.error("[proposeCaseAction] Failed to send proposal email:", err);
+    });
+
+    revalidatePath("/admin/cases");
+    revalidatePath(redirectTo);
+    redirect(redirectTo);
+  } catch (error) {
+    redirectWithActionError(redirectTo, error);
+  }
+}
+
+export async function respondToProposalAction(formData: FormData) {
+  const user = await requirePageUser([UserRole.SPECIALIST]);
+  const proposalId = String(formData.get("proposalId") || "");
+  const decision = String(formData.get("decision") || "");
+  const declineReason = String(formData.get("declineReason") || "");
+  const redirectTo = String(formData.get("redirectTo") || "/specialist/sessions");
+
+  if (!proposalId || !decision) {
+    redirect(encodeErrorPath(redirectTo, "Proposal and decision are required."));
+  }
+
+  try {
+    const result = await respondToCaseProposal({
+      proposalId,
+      accept: decision === "accept",
+      declineReason,
+      actorUserId: user.id,
+    });
+
+    // Send status update email to the specialist when proposal is accepted
+    if (result.accepted) {
+      const proposal = await db.caseProposal.findUnique({
+        where: { id: proposalId },
+        select: { specialist: { select: { email: true } } },
+      });
+
+      if (proposal?.specialist.email) {
+        sendCaseStatusUpdateEmail({
+          recipientEmail: proposal.specialist.email,
+          recipientName: result.specialistName,
+          caseReference: result.caseReference,
+          caseId: result.caseId,
+          statusMessage: `Your case proposal for ${result.caseReference} has been accepted. The case is now moving to the agreement stage.`,
+        }).catch((err) => {
+          console.error("[respondToProposalAction] Failed to send proposal accepted email:", err);
+        });
+      }
+    }
+
+    revalidatePath("/specialist/sessions");
+    revalidatePath("/admin/cases");
+    revalidatePath(redirectTo);
+    redirect(redirectTo);
+  } catch (error) {
+    redirectWithActionError(redirectTo, error);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Session Time Negotiation actions
+// ---------------------------------------------------------------------------
+
+export async function proposeSessionTimesAction(formData: FormData) {
+  const user = await requirePageUser([UserRole.OPS]);
+  const caseId = String(formData.get("caseId") || "");
+  const specialistId = String(formData.get("specialistId") || "");
+  const redirectTo = String(formData.get("redirectTo") || "/admin/cases");
+
+  if (!caseId || !specialistId) {
+    redirect(encodeErrorPath(redirectTo, "Case and specialist are required."));
+  }
+
+  // Parse slot dates from form data (slot_0_start, slot_0_end, slot_1_start, ...)
+  const slots: { startTime: Date; endTime: Date }[] = [];
+  for (let i = 0; i < 5; i++) {
+    const startRaw = formData.get(`slot_${i}_start`);
+    const endRaw = formData.get(`slot_${i}_end`);
+    if (!startRaw || !endRaw) break;
+
+    const startTime = new Date(String(startRaw));
+    const endTime = new Date(String(endRaw));
+
+    if (isNaN(startTime.getTime()) || isNaN(endTime.getTime())) {
+      redirect(encodeErrorPath(redirectTo, `Invalid date in slot ${i + 1}.`));
+    }
+    if (endTime <= startTime) {
+      redirect(encodeErrorPath(redirectTo, `Slot ${i + 1} end time must be after start time.`));
+    }
+
+    slots.push({ startTime, endTime });
+  }
+
+  if (!slots.length) {
+    redirect(encodeErrorPath(redirectTo, "At least one time slot is required."));
+  }
+
+  try {
+    const result = await proposeSessionTimes({
+      caseId,
+      specialistId,
+      slots,
+      actorUserId: user.id,
+    });
+
+    // Fire-and-forget: don't block the redirect on email delivery
+    sendSessionTimeProposalEmail({
+      recipientEmail: result.specialistEmail,
+      recipientName: result.specialistName,
+      caseReference: result.caseReference,
+      caseId: result.caseId,
+      counsellingType: result.counsellingType,
+      proposedByName: user.name,
+      participantSummary: result.participantSummary,
+      slots,
+    }).catch((err) => {
+      console.error("[proposeSessionTimesAction] Failed to send proposal email:", err);
+    });
+
+    revalidatePath("/admin/cases");
+    revalidatePath(redirectTo);
+    redirect(redirectTo);
+  } catch (error) {
+    redirectWithActionError(redirectTo, error);
+  }
+}
+
+export async function respondToSessionTimeProposalAction(formData: FormData) {
+  const user = await requirePageUser([UserRole.SPECIALIST]);
+  const proposalId = String(formData.get("proposalId") || "");
+  const acceptRaw = String(formData.get("accept") || "");
+  const specialistNotes = String(formData.get("specialistNotes") || "");
+  const redirectTo = String(formData.get("redirectTo") || "/specialist/sessions");
+
+  if (!proposalId || !acceptRaw) {
+    redirect(encodeErrorPath(redirectTo, "Proposal and decision are required."));
+  }
+
+  try {
+    const result = await respondToSessionTimeProposal({
+      proposalId,
+      accept: acceptRaw === "true",
+      specialistNotes,
+      actorUserId: user.id,
+    });
+
+    // If accepted, send confirmation email to each client participant
+    if (result.accepted && result.acceptedStartTime && result.acceptedEndTime && result.confirmToken) {
+      for (const email of result.participantEmails) {
+        sendSessionTimeClientConfirmEmail({
+          recipientEmail: email,
+          recipientName: email, // Best available; client name not in result emails array
+          caseReference: result.caseReference,
+          caseId: result.caseId,
+          proposalId,
+          confirmToken: result.confirmToken,
+          startTime: result.acceptedStartTime,
+          endTime: result.acceptedEndTime,
+          specialistName: user.name,
+          clientId: "", // Populated per-participant below is impractical; mailer tolerates empty
+        }).catch((err) => {
+          console.error(
+            "[respondToSessionTimeProposalAction] Failed to send client confirm email:",
+            err,
+          );
+        });
+      }
+    }
+
+    revalidatePath("/specialist/sessions");
+    revalidatePath("/admin/cases");
+    revalidatePath(redirectTo);
+    redirect(redirectTo);
+  } catch (error) {
+    redirectWithActionError(redirectTo, error);
+  }
+}
+
+export async function clientConfirmSessionTimeAction(formData: FormData) {
+  const proposalId = String(formData.get("proposalId") || "");
+  const token = String(formData.get("token") || "");
+  const redirectTo = String(formData.get("redirectTo") || "/confirm-session/thank-you");
+
+  if (!proposalId || !token) {
+    redirect(encodeErrorPath(redirectTo, "Missing confirmation details."));
+  }
+
+  try {
+    await clientConfirmSessionTime({
+      proposalId,
+      token,
+    });
+
     revalidatePath("/admin/cases");
     redirect(redirectTo);
   } catch (error) {

@@ -1,9 +1,12 @@
+import { randomBytes } from "crypto";
 import { hash } from "bcryptjs";
 import {
+  CaseProposalStatus,
   CaseStatus,
   DocumentState,
   Prisma,
   SessionStatus,
+  SessionTimeProposalStatus,
   UserRole,
   WorkflowStepCode,
 } from "@prisma/client";
@@ -1001,8 +1004,9 @@ async function ensureRequiredDocumentsCompleted(
   tx: Tx,
   caseId: string,
   targetStatus: CaseStatus,
+  currentStatus: CaseStatus,
 ) {
-  const requiredCodes = await resolveRequiredDocumentCodesForStatus(targetStatus);
+  const requiredCodes = await resolveRequiredDocumentCodesForStatus(targetStatus, currentStatus);
 
   if (requiredCodes.length === 0) {
     return;
@@ -1034,7 +1038,7 @@ async function ensureRequiredDocumentsCompleted(
   }
 }
 
-async function resolveRequiredDocumentCodesForStatus(status: CaseStatus) {
+async function resolveRequiredDocumentCodesForStatus(status: CaseStatus, currentStatus?: CaseStatus) {
   const operationalSettings = await getOperationalSettings();
 
   if (status === CaseStatus.READY_TO_SCHEDULE || status === CaseStatus.SCHEDULED) {
@@ -1050,6 +1054,10 @@ async function resolveRequiredDocumentCodesForStatus(status: CaseStatus) {
   }
 
   if (status === CaseStatus.CLOSED) {
+    // Skip outtake requirement when declining a referral at early stages
+    if (currentStatus === CaseStatus.NEW || currentStatus === CaseStatus.AWAITING_REVIEW) {
+      return [];
+    }
     return operationalSettings.requireOuttakeBeforeClose
       ? [DOCUMENT_CODES.OUTTAKE_FORM]
       : [];
@@ -1151,7 +1159,7 @@ async function setCaseStatus(
     sessionIdForDocs = sessionIdForDocs ?? scheduledSession.id;
   }
 
-  await ensureRequiredDocumentsCompleted(tx, input.caseId, input.targetStatus);
+  await ensureRequiredDocumentsCompleted(tx, input.caseId, input.targetStatus, input.currentStatus);
 
   await tx.case.update({
     where: { id: input.caseId },
@@ -6047,4 +6055,718 @@ export function getDocumentCodeFriendlyName(code: string) {
     default:
       return code;
   }
+}
+
+// ---------------------------------------------------------------------------
+// Case Proposal workflow
+// ---------------------------------------------------------------------------
+
+export type ProposeCaseInput = {
+  caseId: string;
+  specialistId: string;
+  proposalNote?: string;
+  actorUserId: string;
+};
+
+export type ProposeCaseResult = {
+  proposalId: string;
+  caseId: string;
+  caseReference: string;
+  counsellingType: string | null;
+  specialistId: string;
+  specialistName: string;
+  specialistEmail: string;
+  participantSummary: string;
+};
+
+export async function proposeCaseToSpecialist(input: ProposeCaseInput): Promise<ProposeCaseResult> {
+  const { caseId, specialistId, proposalNote, actorUserId } = input;
+
+  return db.$transaction(async (tx) => {
+    const caseRecord = await tx.case.findUnique({
+      where: { id: caseId },
+      select: {
+        id: true, reference: true, status: true, counsellingType: true,
+        participants: { select: { client: { select: { firstName: true, lastName: true } }, role: true } },
+      },
+    });
+    if (!caseRecord) throw new DomainError("Case not found.", 404);
+
+    // Allow proposing from MATCHED or COUNSELLOR_PROPOSED (re-proposing after decline)
+    if (caseRecord.status !== CaseStatus.MATCHED && caseRecord.status !== CaseStatus.COUNSELLOR_PROPOSED) {
+      throw new DomainError(`Cannot propose case in ${caseRecord.status} status. Case must be in MATCHED status.`, 409);
+    }
+
+    const specialist = await tx.specialist.findUnique({
+      where: { id: specialistId },
+      select: { id: true, name: true, email: true, active: true, supportsCouples: true },
+    });
+    if (!specialist) throw new DomainError("Specialist not found.", 404);
+    if (!specialist.active) throw new DomainError("Specialist is not active.", 409);
+
+    // Check couples compatibility
+    if (caseRecord.counsellingType === "couples" && !specialist.supportsCouples) {
+      throw new DomainError("This specialist does not support couples counselling.", 409);
+    }
+
+    // Withdraw any existing pending proposals for this case
+    await tx.caseProposal.updateMany({
+      where: { caseId, status: CaseProposalStatus.PENDING },
+      data: { status: CaseProposalStatus.WITHDRAWN, updatedAt: new Date() },
+    });
+
+    // Create the proposal
+    const proposal = await tx.caseProposal.create({
+      data: {
+        caseId,
+        specialistId,
+        proposedByUserId: actorUserId,
+        proposalNote: proposalNote?.trim() || null,
+        status: CaseProposalStatus.PENDING,
+      },
+    });
+
+    // Set assignedSpecialistId so the case shows who it's proposed to
+    await tx.case.update({
+      where: { id: caseId },
+      data: { assignedSpecialistId: specialistId },
+    });
+
+    // Transition to COUNSELLOR_PROPOSED
+    await setCaseStatus(tx, {
+      caseId,
+      currentStatus: caseRecord.status,
+      targetStatus: CaseStatus.COUNSELLOR_PROPOSED,
+      actorUserId,
+      statusReason: `Proposed to ${specialist.name}`,
+    });
+
+    await createAuditLog(tx, {
+      caseId,
+      userId: actorUserId,
+      action: "CASE_PROPOSED_TO_SPECIALIST",
+      details: {
+        proposalId: proposal.id,
+        specialistId,
+        specialistName: specialist.name,
+        proposalNote: proposalNote?.trim() || null,
+      },
+    });
+
+    const participantSummary = caseRecord.participants
+      .map((p) => `${p.client.firstName} ${p.client.lastName}${p.role === "SECONDARY" ? " (secondary)" : ""}`)
+      .join(", ");
+
+    return {
+      proposalId: proposal.id,
+      caseId,
+      caseReference: caseRecord.reference,
+      counsellingType: caseRecord.counsellingType,
+      specialistId: specialist.id,
+      specialistName: specialist.name,
+      specialistEmail: specialist.email,
+      participantSummary,
+    };
+  });
+}
+
+export type RespondToProposalInput = {
+  proposalId: string;
+  accept: boolean;
+  declineReason?: string;
+  actorUserId: string;
+};
+
+export type RespondToProposalResult = {
+  proposalId: string;
+  caseId: string;
+  caseReference: string;
+  accepted: boolean;
+  specialistName: string;
+};
+
+export async function respondToCaseProposal(input: RespondToProposalInput): Promise<RespondToProposalResult> {
+  const { proposalId, accept, declineReason, actorUserId } = input;
+
+  return db.$transaction(async (tx) => {
+    const proposal = await tx.caseProposal.findUnique({
+      where: { id: proposalId },
+      include: {
+        case: { select: { id: true, reference: true, status: true } },
+        specialist: { select: { id: true, name: true } },
+      },
+    });
+
+    if (!proposal) throw new DomainError("Proposal not found.", 404);
+    if (proposal.status !== CaseProposalStatus.PENDING) {
+      throw new DomainError(`This proposal has already been ${proposal.status.toLowerCase()}.`, 409);
+    }
+    if (proposal.case.status !== CaseStatus.COUNSELLOR_PROPOSED) {
+      throw new DomainError("Case is no longer awaiting counsellor response.", 409);
+    }
+
+    const now = new Date();
+
+    if (accept) {
+      // Accept the proposal
+      await tx.caseProposal.update({
+        where: { id: proposalId },
+        data: { status: CaseProposalStatus.ACCEPTED, respondedAt: now },
+      });
+
+      // Advance the case — go to AGREEMENT_PENDING (counsellor accepted, now need terms/agreement)
+      await setCaseStatus(tx, {
+        caseId: proposal.caseId,
+        currentStatus: CaseStatus.COUNSELLOR_PROPOSED,
+        targetStatus: CaseStatus.AGREEMENT_PENDING,
+        actorUserId,
+        statusReason: `Accepted by ${proposal.specialist.name}`,
+      });
+
+      await createAuditLog(tx, {
+        caseId: proposal.caseId,
+        userId: actorUserId,
+        action: "CASE_PROPOSAL_ACCEPTED",
+        details: {
+          proposalId,
+          specialistId: proposal.specialistId,
+          specialistName: proposal.specialist.name,
+        },
+      });
+    } else {
+      // Decline the proposal
+      if (!declineReason?.trim()) {
+        throw new DomainError("A reason is required when declining a case proposal.", 400);
+      }
+
+      await tx.caseProposal.update({
+        where: { id: proposalId },
+        data: {
+          status: CaseProposalStatus.DECLINED,
+          declineReason: declineReason.trim(),
+          respondedAt: now,
+        },
+      });
+
+      // Clear the assigned specialist
+      await tx.case.update({
+        where: { id: proposal.caseId },
+        data: { assignedSpecialistId: null },
+      });
+
+      // Go back to MATCHED so ops can propose to someone else
+      await setCaseStatus(tx, {
+        caseId: proposal.caseId,
+        currentStatus: CaseStatus.COUNSELLOR_PROPOSED,
+        targetStatus: CaseStatus.MATCHED,
+        actorUserId,
+        statusReason: `Declined by ${proposal.specialist.name}: ${declineReason.trim()}`,
+      });
+
+      await createAuditLog(tx, {
+        caseId: proposal.caseId,
+        userId: actorUserId,
+        action: "CASE_PROPOSAL_DECLINED",
+        details: {
+          proposalId,
+          specialistId: proposal.specialistId,
+          specialistName: proposal.specialist.name,
+          declineReason: declineReason.trim(),
+        },
+      });
+    }
+
+    return {
+      proposalId,
+      caseId: proposal.caseId,
+      caseReference: proposal.case.reference,
+      accepted: accept,
+      specialistName: proposal.specialist.name,
+    };
+  });
+}
+
+export async function getPendingProposalsForSpecialist(specialistId: string) {
+  return db.caseProposal.findMany({
+    where: {
+      specialistId,
+      status: CaseProposalStatus.PENDING,
+    },
+    include: {
+      case: {
+        select: {
+          id: true,
+          reference: true,
+          counsellingType: true,
+          notes: true,
+          flags: true,
+          intakeReviewNotes: true,
+          participants: {
+            select: {
+              client: {
+                select: {
+                  firstName: true,
+                  lastName: true,
+                },
+              },
+              role: true,
+            },
+          },
+        },
+      },
+      proposedBy: {
+        select: {
+          name: true,
+        },
+      },
+    },
+    orderBy: { createdAt: "desc" },
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Session Time Negotiation workflow
+// ---------------------------------------------------------------------------
+
+export type ProposeSessionTimesInput = {
+  caseId: string;
+  specialistId: string;
+  slots: { startTime: Date; endTime: Date }[];
+  actorUserId: string;
+};
+
+export type ProposeSessionTimesResult = {
+  proposalIds: string[];
+  caseId: string;
+  caseReference: string;
+  specialistId: string;
+  specialistName: string;
+  specialistEmail: string;
+  counsellingType: string | null;
+  participantSummary: string;
+};
+
+export async function proposeSessionTimes(
+  input: ProposeSessionTimesInput,
+): Promise<ProposeSessionTimesResult> {
+  const { caseId, specialistId, slots, actorUserId } = input;
+
+  if (!slots.length) {
+    throw new DomainError("At least one time slot is required.", 400);
+  }
+  if (slots.length > 5) {
+    throw new DomainError("A maximum of 5 time slots can be proposed.", 400);
+  }
+
+  return db.$transaction(async (tx) => {
+    const caseRecord = await tx.case.findUnique({
+      where: { id: caseId },
+      select: {
+        id: true,
+        reference: true,
+        status: true,
+        counsellingType: true,
+        participants: {
+          select: {
+            client: { select: { firstName: true, lastName: true } },
+            role: true,
+          },
+        },
+      },
+    });
+    if (!caseRecord) throw new DomainError("Case not found.", 404);
+
+    if (
+      caseRecord.status !== CaseStatus.READY_TO_SCHEDULE &&
+      caseRecord.status !== CaseStatus.SLOT_PROPOSED
+    ) {
+      throw new DomainError(
+        `Cannot propose session times in ${caseRecord.status} status. Case must be in READY_TO_SCHEDULE or SLOT_PROPOSED status.`,
+        409,
+      );
+    }
+
+    const specialist = await tx.specialist.findUnique({
+      where: { id: specialistId },
+      select: { id: true, name: true, email: true, active: true },
+    });
+    if (!specialist) throw new DomainError("Specialist not found.", 404);
+    if (!specialist.active) throw new DomainError("Specialist is not active.", 409);
+
+    // Withdraw any existing PENDING proposals for this case
+    await tx.sessionTimeProposal.updateMany({
+      where: { caseId, status: SessionTimeProposalStatus.PENDING },
+      data: { status: SessionTimeProposalStatus.WITHDRAWN, updatedAt: new Date() },
+    });
+
+    // Create a proposal record for each slot
+    const proposalIds: string[] = [];
+    for (const slot of slots) {
+      const confirmToken = randomBytes(32).toString("hex");
+      const proposal = await tx.sessionTimeProposal.create({
+        data: {
+          caseId,
+          specialistId,
+          proposedByUserId: actorUserId,
+          proposedStartTime: slot.startTime,
+          proposedEndTime: slot.endTime,
+          status: SessionTimeProposalStatus.PENDING,
+          confirmToken,
+        },
+      });
+      proposalIds.push(proposal.id);
+    }
+
+    // Transition case to SLOT_PROPOSED
+    await setCaseStatus(tx, {
+      caseId,
+      currentStatus: caseRecord.status,
+      targetStatus: CaseStatus.SLOT_PROPOSED,
+      actorUserId,
+      statusReason: `Proposed ${slots.length} time slot(s) to ${specialist.name}`,
+    });
+
+    await createAuditLog(tx, {
+      caseId,
+      userId: actorUserId,
+      action: "SESSION_TIMES_PROPOSED",
+      details: {
+        proposalIds,
+        specialistId,
+        specialistName: specialist.name,
+        slotCount: slots.length,
+      },
+    });
+
+    const participantSummary = caseRecord.participants
+      .map(
+        (p) =>
+          `${p.client.firstName} ${p.client.lastName}${p.role === "SECONDARY" ? " (secondary)" : ""}`,
+      )
+      .join(", ");
+
+    return {
+      proposalIds,
+      caseId,
+      caseReference: caseRecord.reference,
+      specialistId: specialist.id,
+      specialistName: specialist.name,
+      specialistEmail: specialist.email,
+      counsellingType: caseRecord.counsellingType,
+      participantSummary,
+    };
+  });
+}
+
+export type RespondToSessionTimeInput = {
+  proposalId: string;
+  accept: boolean;
+  specialistNotes?: string;
+  actorUserId: string;
+};
+
+export type RespondToSessionTimeResult = {
+  caseId: string;
+  caseReference: string;
+  accepted: boolean;
+  acceptedStartTime?: Date;
+  acceptedEndTime?: Date;
+  confirmToken?: string;
+  participantSummary: string;
+  participantEmails: string[];
+};
+
+export async function respondToSessionTimeProposal(
+  input: RespondToSessionTimeInput,
+): Promise<RespondToSessionTimeResult> {
+  const { proposalId, accept, specialistNotes, actorUserId } = input;
+
+  return db.$transaction(async (tx) => {
+    const proposal = await tx.sessionTimeProposal.findUnique({
+      where: { id: proposalId },
+      include: {
+        case: {
+          select: {
+            id: true,
+            reference: true,
+            status: true,
+            participants: {
+              select: {
+                client: {
+                  select: { id: true, firstName: true, lastName: true, email: true },
+                },
+                role: true,
+              },
+            },
+          },
+        },
+        specialist: { select: { id: true, name: true } },
+      },
+    });
+
+    if (!proposal) throw new DomainError("Proposal not found.", 404);
+    if (proposal.status !== SessionTimeProposalStatus.PENDING) {
+      throw new DomainError(
+        `This proposal has already been ${proposal.status.toLowerCase().replace(/_/g, " ")}.`,
+        409,
+      );
+    }
+    if (proposal.case.status !== CaseStatus.SLOT_PROPOSED) {
+      throw new DomainError("Case is no longer awaiting specialist time response.", 409);
+    }
+
+    // Validate the acting user is the specialist
+    const actorUser = await tx.userAccount.findUnique({
+      where: { id: actorUserId },
+      select: { specialistId: true },
+    });
+    if (!actorUser?.specialistId || actorUser.specialistId !== proposal.specialistId) {
+      throw new DomainError("You are not authorised to respond to this proposal.", 403);
+    }
+
+    const now = new Date();
+
+    if (accept) {
+      // Accept this proposal
+      await tx.sessionTimeProposal.update({
+        where: { id: proposalId },
+        data: {
+          status: SessionTimeProposalStatus.SPECIALIST_ACCEPTED,
+          specialistNotes: specialistNotes?.trim() || null,
+          specialistRespondedAt: now,
+        },
+      });
+
+      // Withdraw all other PENDING proposals for this case
+      await tx.sessionTimeProposal.updateMany({
+        where: {
+          caseId: proposal.caseId,
+          status: SessionTimeProposalStatus.PENDING,
+          id: { not: proposalId },
+        },
+        data: { status: SessionTimeProposalStatus.WITHDRAWN, updatedAt: now },
+      });
+
+      // Transition case to SLOT_CONFIRMED
+      await setCaseStatus(tx, {
+        caseId: proposal.caseId,
+        currentStatus: CaseStatus.SLOT_PROPOSED,
+        targetStatus: CaseStatus.SLOT_CONFIRMED,
+        actorUserId,
+        statusReason: `Slot accepted by ${proposal.specialist.name}`,
+      });
+
+      await createAuditLog(tx, {
+        caseId: proposal.caseId,
+        userId: actorUserId,
+        action: "SESSION_TIME_ACCEPTED",
+        details: {
+          proposalId,
+          specialistId: proposal.specialistId,
+          specialistName: proposal.specialist.name,
+          startTime: proposal.proposedStartTime.toISOString(),
+          endTime: proposal.proposedEndTime.toISOString(),
+        },
+      });
+    } else {
+      // Decline this proposal
+      await tx.sessionTimeProposal.update({
+        where: { id: proposalId },
+        data: {
+          status: SessionTimeProposalStatus.SPECIALIST_DECLINED,
+          specialistNotes: specialistNotes?.trim() || null,
+          specialistRespondedAt: now,
+        },
+      });
+
+      // Check if any PENDING proposals remain for this case
+      const remainingCount = await tx.sessionTimeProposal.count({
+        where: {
+          caseId: proposal.caseId,
+          status: SessionTimeProposalStatus.PENDING,
+        },
+      });
+
+      if (remainingCount === 0) {
+        // No more pending proposals - go back to READY_TO_SCHEDULE
+        await setCaseStatus(tx, {
+          caseId: proposal.caseId,
+          currentStatus: CaseStatus.SLOT_PROPOSED,
+          targetStatus: CaseStatus.READY_TO_SCHEDULE,
+          actorUserId,
+          statusReason: `All proposed slots declined by ${proposal.specialist.name}`,
+        });
+      }
+
+      await createAuditLog(tx, {
+        caseId: proposal.caseId,
+        userId: actorUserId,
+        action: "SESSION_TIME_DECLINED",
+        details: {
+          proposalId,
+          specialistId: proposal.specialistId,
+          specialistName: proposal.specialist.name,
+          specialistNotes: specialistNotes?.trim() || null,
+          remainingPendingSlots: remainingCount,
+        },
+      });
+    }
+
+    const participantSummary = proposal.case.participants
+      .map(
+        (p) =>
+          `${p.client.firstName} ${p.client.lastName}${p.role === "SECONDARY" ? " (secondary)" : ""}`,
+      )
+      .join(", ");
+
+    const participantEmails = proposal.case.participants.map((p) => p.client.email);
+
+    return {
+      caseId: proposal.caseId,
+      caseReference: proposal.case.reference,
+      accepted: accept,
+      acceptedStartTime: accept ? proposal.proposedStartTime : undefined,
+      acceptedEndTime: accept ? proposal.proposedEndTime : undefined,
+      confirmToken: accept ? (proposal.confirmToken ?? undefined) : undefined,
+      participantSummary,
+      participantEmails,
+    };
+  });
+}
+
+export type ClientConfirmSessionTimeInput = {
+  proposalId: string;
+  token: string;
+  clientIp?: string;
+};
+
+export type ClientConfirmSessionTimeResult = {
+  caseId: string;
+  caseReference: string;
+  sessionId: string;
+  startTime: Date;
+  endTime: Date;
+};
+
+export async function clientConfirmSessionTime(
+  input: ClientConfirmSessionTimeInput,
+): Promise<ClientConfirmSessionTimeResult> {
+  const { proposalId, token, clientIp } = input;
+
+  return db.$transaction(async (tx) => {
+    const proposal = await tx.sessionTimeProposal.findUnique({
+      where: { id: proposalId },
+      include: {
+        case: { select: { id: true, reference: true, status: true } },
+        specialist: { select: { id: true, name: true } },
+      },
+    });
+
+    if (!proposal) throw new DomainError("Proposal not found.", 404);
+    if (!proposal.confirmToken || proposal.confirmToken !== token) {
+      throw new DomainError("Invalid confirmation token.", 403);
+    }
+    if (proposal.status !== SessionTimeProposalStatus.SPECIALIST_ACCEPTED) {
+      throw new DomainError("This proposal is not awaiting client confirmation.", 409);
+    }
+    if (proposal.case.status !== CaseStatus.SLOT_CONFIRMED) {
+      throw new DomainError("Case is no longer awaiting client confirmation.", 409);
+    }
+
+    const now = new Date();
+
+    // Update proposal to CLIENT_CONFIRMED
+    await tx.sessionTimeProposal.update({
+      where: { id: proposalId },
+      data: {
+        status: SessionTimeProposalStatus.CLIENT_CONFIRMED,
+        clientConfirmedAt: now,
+      },
+    });
+
+    // Create the session record
+    const session = await tx.session.create({
+      data: {
+        caseId: proposal.caseId,
+        specialistId: proposal.specialistId,
+        providerType: "manual",
+        providerBookingId: `manual-confirm-${proposalId}`,
+        providerStartTime: proposal.proposedStartTime,
+        providerEndTime: proposal.proposedEndTime,
+        providerStatus: "scheduled",
+        status: SessionStatus.SCHEDULED,
+      },
+    });
+
+    // Try to transition case to SCHEDULED. This may fail if required
+    // documents (e.g. T&Cs) are still pending — that's OK, the session
+    // and proposal updates should still persist. Ops can advance the
+    // case once documents are completed.
+    let transitionError: string | undefined;
+    try {
+      await setCaseStatus(tx, {
+        caseId: proposal.caseId,
+        currentStatus: CaseStatus.SLOT_CONFIRMED,
+        targetStatus: CaseStatus.SCHEDULED,
+        actorUserId: undefined,
+        statusReason: "Client confirmed session time",
+        sessionIdForDocs: session.id,
+      });
+    } catch (err) {
+      transitionError =
+        err instanceof DomainError ? err.message : "Failed to transition case to SCHEDULED";
+    }
+
+    await createAuditLog(tx, {
+      caseId: proposal.caseId,
+      action: "SESSION_TIME_CLIENT_CONFIRMED",
+      details: {
+        proposalId,
+        sessionId: session.id,
+        startTime: proposal.proposedStartTime.toISOString(),
+        endTime: proposal.proposedEndTime.toISOString(),
+        clientIp: clientIp || null,
+        transitionError: transitionError || null,
+      },
+    });
+
+    return {
+      caseId: proposal.caseId,
+      caseReference: proposal.case.reference,
+      sessionId: session.id,
+      startTime: proposal.proposedStartTime,
+      endTime: proposal.proposedEndTime,
+    };
+  });
+}
+
+export async function getPendingTimeProposalsForSpecialist(specialistId: string) {
+  return db.sessionTimeProposal.findMany({
+    where: {
+      specialistId,
+      status: SessionTimeProposalStatus.PENDING,
+    },
+    include: {
+      case: {
+        select: {
+          id: true,
+          reference: true,
+          counsellingType: true,
+          flags: true,
+          participants: {
+            select: {
+              client: {
+                select: {
+                  firstName: true,
+                  lastName: true,
+                },
+              },
+              role: true,
+            },
+          },
+        },
+      },
+    },
+    orderBy: { createdAt: "desc" },
+  });
 }

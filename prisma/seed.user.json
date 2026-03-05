@@ -35,6 +35,18 @@
       "lastName": "Example",
       "email": "blocked.example@example.com",
       "phone": "+447700911105"
+    },
+    {
+      "firstName": "Dana",
+      "lastName": "Marsh",
+      "email": "dana.marsh@example.com",
+      "phone": "+447700911106"
+    },
+    {
+      "firstName": "Lee",
+      "lastName": "Grant",
+      "email": "lee.grant@example.com",
+      "phone": "+447700911107"
     }
   ],
   "cases": [
@@ -271,6 +283,99 @@
         }
       },
       "completedFormTypes": ["INTAKE_FORM"]
+    },
+    {
+      "reference": "CASE-USER-2006",
+      "status": "COUNSELLOR_PROPOSED",
+      "intakeSource": "SECURE_LINK",
+      "counsellingType": "individual",
+      "participants": ["dana.marsh@example.com"],
+      "assignedSpecialistEmail": "avery.specialist@demo.local",
+      "notes": "Counsellor proposal pending specialist acceptance.",
+      "flags": ["proposal_demo"],
+      "workflowCode": "INDIVIDUAL_COUNSELLING",
+      "intakeFormData": {
+        "participantType": "single",
+        "primary": {
+          "title": "Ms",
+          "firstName": "Dana",
+          "lastName": "Marsh",
+          "email": "dana.marsh@example.com",
+          "mainPhone": "+447700911106",
+          "dateOfBirth": "1991-06-15",
+          "gender": "female",
+          "churchConnection": "yes",
+          "leadershipRole": "no",
+          "heardAbout": "WEBSITE"
+        },
+        "presenting": {
+          "mainIssue": "BEREAVEMENT",
+          "issueDuration": "3 months",
+          "previousSupport": "no",
+          "suicidalThoughtsRecently": "no",
+          "attemptedSuicide": "no"
+        },
+        "availability": {
+          "location": "NEWTOWNARDS",
+          "includeOnline": true,
+          "notes": "Mornings preferred.",
+          "timePreferences": ["MORNING"],
+          "selectedSlots": []
+        }
+      },
+      "completedFormTypes": ["INTAKE_FORM", "AVAILABILITY_CAPTURED"],
+      "caseProposal": {
+        "specialistEmail": "avery.specialist@demo.local",
+        "status": "PENDING",
+        "notes": "Good match for anxiety and bereavement support."
+      }
+    },
+    {
+      "reference": "CASE-USER-2007",
+      "status": "SLOT_PROPOSED",
+      "intakeSource": "SECURE_LINK",
+      "counsellingType": "individual",
+      "participants": ["lee.grant@example.com"],
+      "assignedSpecialistEmail": "avery.specialist@demo.local",
+      "notes": "Session time slots proposed, awaiting specialist response.",
+      "flags": ["slot_demo"],
+      "workflowCode": "INDIVIDUAL_COUNSELLING",
+      "intakeFormData": {
+        "participantType": "single",
+        "primary": {
+          "title": "Mr",
+          "firstName": "Lee",
+          "lastName": "Grant",
+          "email": "lee.grant@example.com",
+          "mainPhone": "+447700911107",
+          "dateOfBirth": "1987-09-03",
+          "gender": "male",
+          "churchConnection": "no",
+          "leadershipRole": "no",
+          "heardAbout": "OTHER",
+          "heardAboutOtherDetail": "Referred by employer."
+        },
+        "presenting": {
+          "mainIssue": "ANXIETY_STRESS",
+          "issueDuration": "6 months",
+          "previousSupport": "yes",
+          "previousSupportDetails": "CBT through NHS.",
+          "suicidalThoughtsRecently": "no",
+          "attemptedSuicide": "no"
+        },
+        "availability": {
+          "location": "ONLINE",
+          "includeOnline": true,
+          "notes": "Flexible weekday availability.",
+          "timePreferences": ["MORNING", "AFTERNOON"],
+          "selectedSlots": []
+        }
+      },
+      "completedFormTypes": ["INTAKE_FORM", "AVAILABILITY_CAPTURED"],
+      "sessionTimeProposals": [
+        { "status": "PENDING" },
+        { "status": "PENDING" }
+      ]
     }
   ],
   "formPins": [
