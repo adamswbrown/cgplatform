@@ -9,7 +9,10 @@ import {
   revokeFormPinAction,
   overrideAssignmentAction,
   proposeCaseAction,
+  proposeCaseToCounsellorAction,
+  proposeSlotAction,
   transitionCaseAction,
+  triageCaseAction,
   updateCaseIntakeReviewNotesAction,
 } from "@/app/actions";
 import { AuthenticatedShell } from "@/components/authenticated-shell";
@@ -22,8 +25,13 @@ import { requirePageUser } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { getOperationalSettings } from "@/lib/admin-settings";
 import {
+  getActiveCaseProposal,
+  getActiveSlotProposal,
   getCaseDetails,
+  getCaseProposalHistory,
   getCaseSpecialistAvailability,
+  getSlotProposalHistory,
+  getTriageHistory,
   listSpecialistsForOps,
   listWorkflowTemplatesForOps,
 } from "@/lib/case-service";
@@ -725,7 +733,7 @@ export default async function CaseDetailPage({ params, searchParams }: CaseDetai
 
   const [caseItem, specialists, workflowTemplates, operationalSettings] = await Promise.all([
     getCaseDetails(id),
-    assignmentPanelActive ? listSpecialistsForOps() : Promise.resolve([]),
+    listSpecialistsForOps(),
     assignmentPanelActive ? listWorkflowTemplatesForOps() : Promise.resolve([]),
     formsPanelActive || assignmentPanelActive ? getOperationalSettings() : Promise.resolve(null),
   ]);
@@ -745,6 +753,16 @@ export default async function CaseDetailPage({ params, searchParams }: CaseDetai
         orderBy: { proposedStartTime: "asc" },
       })
     : [];
+
+  // Review workflow data
+  const [triageHistory, activeProposal, proposalHistory, activeSlot, slotHistory] =
+    await Promise.all([
+      getTriageHistory(caseItem.id),
+      getActiveCaseProposal(caseItem.id),
+      getCaseProposalHistory(caseItem.id),
+      getActiveSlotProposal(caseItem.id),
+      getSlotProposalHistory(caseItem.id),
+    ]);
 
   const transitionOptions = CASE_TRANSITIONS[caseItem.status];
   const error = typeof query.error === "string" ? query.error : null;
@@ -957,6 +975,282 @@ export default async function CaseDetailPage({ params, searchParams }: CaseDetai
           </div>
         </div>
       </section>
+
+      {/* ── Review Workflow Section ── */}
+
+      {caseItem.status === "AWAITING_REVIEW" ? (
+        <section className="mt-4 rounded-2xl border-2 border-[color:var(--cg-status-review)] bg-[color:var(--surface)] p-5 shadow-sm">
+          <h3 className="text-sm font-semibold uppercase tracking-wide text-[color:var(--muted)]">Triage Review</h3>
+          <p className="mt-1 text-xs text-[color:var(--muted)]">
+            Review the intake data below and approve, flag, or decline this case.
+          </p>
+          <form action={triageCaseAction} className="mt-3 space-y-3">
+            <input type="hidden" name="caseId" value={caseItem.id} />
+            <input type="hidden" name="redirectTo" value={`/admin/cases/${caseItem.id}`} />
+            <div>
+              <label htmlFor="triageNotes" className="block text-xs font-medium">
+                Triage notes
+              </label>
+              <textarea
+                id="triageNotes"
+                name="notes"
+                rows={2}
+                className="mt-1 w-full rounded-lg border border-[color:var(--border)] bg-transparent px-3 py-2 text-sm"
+                placeholder="Optional notes about this decision..."
+              />
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="submit"
+                name="decision"
+                value="APPROVED"
+                className="rounded-lg bg-green-600 px-4 py-2 text-sm font-semibold text-white hover:bg-green-700"
+              >
+                Approve
+              </button>
+              <button
+                type="submit"
+                name="decision"
+                value="FLAGGED"
+                className="rounded-lg bg-amber-500 px-4 py-2 text-sm font-semibold text-white hover:bg-amber-600"
+              >
+                Flag
+              </button>
+              <button
+                type="submit"
+                name="decision"
+                value="DECLINED"
+                className="rounded-lg bg-red-600 px-4 py-2 text-sm font-semibold text-white hover:bg-red-700"
+              >
+                Decline
+              </button>
+            </div>
+          </form>
+          {triageHistory.length > 0 ? (
+            <div className="mt-4 border-t border-[color:var(--border)] pt-3">
+              <p className="text-xs font-semibold uppercase tracking-wide text-[color:var(--muted)]">Previous triage decisions</p>
+              <ul className="mt-2 space-y-2 text-xs">
+                {triageHistory.map((record) => (
+                  <li key={record.id} className="rounded-lg border border-[color:var(--border)] p-2">
+                    <span className="font-semibold">{record.decision}</span>
+                    {record.triagedBy ? <span className="text-[color:var(--muted)]"> by {record.triagedBy.name}</span> : null}
+                    <span className="text-[color:var(--muted)]"> &middot; {formatDateTime(record.createdAt)}</span>
+                    {record.notes ? <p className="mt-1 text-[color:var(--muted)]">{record.notes}</p> : null}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
+        </section>
+      ) : null}
+
+      {caseItem.status === "MATCHED" ? (
+        <section className="mt-4 rounded-2xl border-2 border-[color:var(--cg-status-matched)] bg-[color:var(--surface)] p-5 shadow-sm">
+          <h3 className="text-sm font-semibold uppercase tracking-wide text-[color:var(--muted)]">Propose to Counsellor</h3>
+          <p className="mt-1 text-xs text-[color:var(--muted)]">
+            Select a counsellor to propose this case to. They will be able to review and accept or decline.
+          </p>
+          <form action={proposeCaseToCounsellorAction} className="mt-3 space-y-3">
+            <input type="hidden" name="caseId" value={caseItem.id} />
+            <input type="hidden" name="redirectTo" value={`/admin/cases/${caseItem.id}`} />
+            <div>
+              <label htmlFor="proposalSpecialistId" className="block text-xs font-medium">
+                Counsellor
+              </label>
+              <select
+                id="proposalSpecialistId"
+                name="specialistId"
+                required
+                className="mt-1 w-full rounded-lg border border-[color:var(--border)] bg-transparent px-3 py-2 text-sm"
+              >
+                <option value="">Select a counsellor...</option>
+                {specialists.map((s) => (
+                  <option key={s.id} value={s.id}>
+                    {s.name}{s.supportsCouples ? " (couples)" : ""}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label htmlFor="proposalNote" className="block text-xs font-medium">
+                Note for counsellor
+              </label>
+              <textarea
+                id="proposalNote"
+                name="proposalNote"
+                rows={2}
+                className="mt-1 w-full rounded-lg border border-[color:var(--border)] bg-transparent px-3 py-2 text-sm"
+                placeholder="Optional context for the counsellor..."
+              />
+            </div>
+            <button
+              type="submit"
+              className="rounded-lg bg-[color:var(--accent)] px-4 py-2 text-sm font-semibold text-white hover:opacity-90"
+            >
+              Send proposal
+            </button>
+          </form>
+          {proposalHistory.length > 0 ? (
+            <div className="mt-4 border-t border-[color:var(--border)] pt-3">
+              <p className="text-xs font-semibold uppercase tracking-wide text-[color:var(--muted)]">Proposal history</p>
+              <ul className="mt-2 space-y-2 text-xs">
+                {proposalHistory.map((p) => (
+                  <li key={p.id} className="rounded-lg border border-[color:var(--border)] p-2">
+                    <span className="font-semibold">{p.specialist.name}</span>
+                    <span className={`ml-2 rounded-full px-2 py-0.5 text-[10px] font-semibold ${
+                      p.status === "ACCEPTED" ? "bg-green-100 text-green-800" :
+                      p.status === "DECLINED" ? "bg-red-100 text-red-800" :
+                      p.status === "PENDING" ? "bg-amber-100 text-amber-800" :
+                      "bg-gray-100 text-gray-800"
+                    }`}>
+                      {p.status}
+                    </span>
+                    {p.proposedBy ? <span className="text-[color:var(--muted)]"> proposed by {p.proposedBy.name}</span> : null}
+                    <span className="text-[color:var(--muted)]"> &middot; {formatDateTime(p.createdAt)}</span>
+                    {p.responseNote ? <p className="mt-1 text-[color:var(--muted)]">Response: {p.responseNote}</p> : null}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
+        </section>
+      ) : null}
+
+      {caseItem.status === "COUNSELLOR_PROPOSED" && activeProposal ? (
+        <section className="mt-4 rounded-2xl border-2 border-[color:var(--cg-status-review)] bg-[color:var(--surface)] p-5 shadow-sm">
+          <h3 className="text-sm font-semibold uppercase tracking-wide text-[color:var(--muted)]">Awaiting Counsellor Response</h3>
+          <p className="mt-2 text-sm">
+            Case proposed to <strong>{activeProposal.specialist.name}</strong>
+            {activeProposal.proposedBy ? <> by {activeProposal.proposedBy.name}</> : null}
+            <span className="text-[color:var(--muted)]"> &middot; {formatDateTime(activeProposal.createdAt)}</span>
+          </p>
+          {activeProposal.proposalNote ? (
+            <p className="mt-1 text-xs text-[color:var(--muted)]">Note: {activeProposal.proposalNote}</p>
+          ) : null}
+          <p className="mt-2 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800">
+            Waiting for {activeProposal.specialist.name} to accept or decline this case.
+          </p>
+        </section>
+      ) : null}
+
+      {caseItem.status === "COUNSELLOR_ACCEPTED" ? (
+        <section className="mt-4 rounded-2xl border-2 border-[color:var(--cg-status-matched)] bg-[color:var(--surface)] p-5 shadow-sm">
+          <h3 className="text-sm font-semibold uppercase tracking-wide text-[color:var(--muted)]">Propose Time Slot</h3>
+          <p className="mt-1 text-xs text-[color:var(--muted)]">
+            {caseItem.assignedSpecialist?.name ?? "Counsellor"} has accepted this case. Propose a session time.
+          </p>
+          <form action={proposeSlotAction} className="mt-3 space-y-3">
+            <input type="hidden" name="caseId" value={caseItem.id} />
+            <input type="hidden" name="redirectTo" value={`/admin/cases/${caseItem.id}`} />
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div>
+                <label htmlFor="proposedStartTime" className="block text-xs font-medium">
+                  Proposed start
+                </label>
+                <input
+                  type="datetime-local"
+                  id="proposedStartTime"
+                  name="proposedStartTime"
+                  required
+                  className="mt-1 w-full rounded-lg border border-[color:var(--border)] bg-transparent px-3 py-2 text-sm"
+                />
+              </div>
+              <div>
+                <label htmlFor="proposedEndTime" className="block text-xs font-medium">
+                  Proposed end
+                </label>
+                <input
+                  type="datetime-local"
+                  id="proposedEndTime"
+                  name="proposedEndTime"
+                  required
+                  className="mt-1 w-full rounded-lg border border-[color:var(--border)] bg-transparent px-3 py-2 text-sm"
+                />
+              </div>
+            </div>
+            <div>
+              <label htmlFor="slotProposalNote" className="block text-xs font-medium">
+                Note
+              </label>
+              <textarea
+                id="slotProposalNote"
+                name="proposalNote"
+                rows={2}
+                className="mt-1 w-full rounded-lg border border-[color:var(--border)] bg-transparent px-3 py-2 text-sm"
+                placeholder="Optional note..."
+              />
+            </div>
+            <button
+              type="submit"
+              className="rounded-lg bg-[color:var(--accent)] px-4 py-2 text-sm font-semibold text-white hover:opacity-90"
+            >
+              Propose slot
+            </button>
+          </form>
+        </section>
+      ) : null}
+
+      {caseItem.status === "SLOT_PROPOSED" && activeSlot ? (
+        <section className="mt-4 rounded-2xl border-2 border-[color:var(--cg-status-review)] bg-[color:var(--surface)] p-5 shadow-sm">
+          <h3 className="text-sm font-semibold uppercase tracking-wide text-[color:var(--muted)]">Slot Proposal Status</h3>
+          <p className="mt-2 text-sm">
+            <strong>{formatDateTime(activeSlot.proposedStartTime)}</strong> &ndash;{" "}
+            <strong>{formatDateTime(activeSlot.proposedEndTime)}</strong>
+          </p>
+          <p className="mt-1 text-xs">
+            Status:{" "}
+            <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${
+              activeSlot.status === "PENDING_COUNSELLOR" ? "bg-amber-100 text-amber-800" :
+              activeSlot.status === "PENDING_CLIENT" ? "bg-blue-100 text-blue-800" :
+              "bg-gray-100 text-gray-800"
+            }`}>
+              {activeSlot.status === "PENDING_COUNSELLOR" ? "Waiting for counsellor" :
+               activeSlot.status === "PENDING_CLIENT" ? "Waiting for client" :
+               activeSlot.status}
+            </span>
+          </p>
+          {activeSlot.proposalNote ? (
+            <p className="mt-1 text-xs text-[color:var(--muted)]">Note: {activeSlot.proposalNote}</p>
+          ) : null}
+        </section>
+      ) : null}
+
+      {caseItem.status === "SLOT_CONFIRMED" ? (
+        <section className="mt-4 rounded-2xl border-2 border-green-400 bg-green-50 p-5 shadow-sm">
+          <h3 className="text-sm font-semibold uppercase tracking-wide text-green-800">Slot Confirmed</h3>
+          <p className="mt-1 text-xs text-green-700">
+            Both counsellor and client have accepted the proposed slot. The case will proceed to agreement.
+          </p>
+        </section>
+      ) : null}
+
+      {/* Slot history */}
+      {slotHistory.length > 0 && (caseItem.status === "COUNSELLOR_ACCEPTED" || caseItem.status === "SLOT_PROPOSED") ? (
+        <section className="mt-2 rounded-2xl border border-[color:var(--border)] bg-[color:var(--surface)] p-4 shadow-sm">
+          <p className="text-xs font-semibold uppercase tracking-wide text-[color:var(--muted)]">Slot proposal history</p>
+          <ul className="mt-2 space-y-2 text-xs">
+            {slotHistory.map((s) => (
+              <li key={s.id} className="rounded-lg border border-[color:var(--border)] p-2">
+                {formatDateTime(s.proposedStartTime)} &ndash; {formatDateTime(s.proposedEndTime)}
+                <span className={`ml-2 rounded-full px-2 py-0.5 text-[10px] font-semibold ${
+                  s.status === "CONFIRMED" ? "bg-green-100 text-green-800" :
+                  s.status === "DECLINED" ? "bg-red-100 text-red-800" :
+                  s.status === "CLIENT_COUNTER_PROPOSED" ? "bg-blue-100 text-blue-800" :
+                  s.status === "CANCELLED" ? "bg-gray-100 text-gray-600" :
+                  "bg-amber-100 text-amber-800"
+                }`}>
+                  {s.status}
+                </span>
+                {s.counterProposedStartTime ? (
+                  <span className="ml-2 text-[color:var(--muted)]">
+                    Counter: {formatDateTime(s.counterProposedStartTime)}
+                  </span>
+                ) : null}
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
 
       <section className="mt-4 rounded-2xl border border-[color:var(--border)] bg-[color:var(--surface)] shadow-sm">
         <div className="flex items-center justify-between px-4 pt-1">

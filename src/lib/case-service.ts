@@ -3,18 +3,35 @@ import { hash } from "bcryptjs";
 import {
   CaseProposalStatus,
   CaseStatus,
+  CaseWorkflowStepStatus,
   DocumentState,
+  EmailStatus,
+  EmailType,
+  NotificationType,
+  ParticipantRole,
   Prisma,
   SessionStatus,
   SessionTimeProposalStatus,
+  SlotProposalStatus,
+  TriageDecision,
   UserRole,
   WorkflowStepCode,
 } from "@prisma/client";
 import { getOperationalSettings, normalizeIntakeSourceType } from "@/lib/admin-settings";
 import { db } from "@/lib/db";
+import { issueFormPin } from "@/lib/form-access";
+import {
+  logEmail,
+  sendCaseProposalCounsellorEmail,
+  sendFormPinEmail,
+  sendSlotConfirmedEmail,
+  sendSlotProposalToClientEmail,
+  sendSlotProposalToCounsellorEmail,
+} from "@/lib/mailer";
 import { createSchedulingProvider } from "@/lib/scheduling";
 import { getSchedulingAssignmentMode, isAutoAllocationEnabled } from "@/lib/scheduling/config";
 import type { SchedulingCaseData, SchedulingEventType } from "@/lib/scheduling/types";
+import { createNotification, createNotificationsForRole } from "@/lib/notification-service";
 import { CASE_TRANSITIONS, DOCUMENT_CODES } from "@/lib/workflow";
 
 export class DomainError extends Error {
@@ -96,6 +113,10 @@ const AVAILABILITY_CAPTURED_STEP_CODE: WorkflowStepCode = WorkflowStepCode.AVAIL
 const TERMS_SUBMISSION_ALLOWED_STATUSES: CaseStatus[] = [
   CaseStatus.AWAITING_REVIEW,
   CaseStatus.MATCHED,
+  CaseStatus.COUNSELLOR_PROPOSED,
+  CaseStatus.COUNSELLOR_ACCEPTED,
+  CaseStatus.SLOT_PROPOSED,
+  CaseStatus.SLOT_CONFIRMED,
   CaseStatus.AGREEMENT_PENDING,
   CaseStatus.READY_TO_SCHEDULE,
   CaseStatus.SCHEDULED,
@@ -4735,6 +4756,33 @@ const WORKFLOW_PRESET_DEFINITIONS: Record<WorkflowPresetKind, WorkflowPresetDefi
     description: "Recommended baseline workflow for one-to-one counselling.",
     steps: [
       {
+        name: "Triage review",
+        type: "REVIEW",
+        stepCode: WorkflowStepCode.TRIAGE_REVIEW,
+        required: true,
+        requiresAllParticipants: false,
+        blocksScheduling: true,
+        sortOrder: 10,
+      },
+      {
+        name: "Counsellor acceptance",
+        type: "REVIEW",
+        stepCode: WorkflowStepCode.COUNSELLOR_ACCEPTANCE,
+        required: true,
+        requiresAllParticipants: false,
+        blocksScheduling: true,
+        sortOrder: 20,
+      },
+      {
+        name: "Slot acceptance",
+        type: "REVIEW",
+        stepCode: WorkflowStepCode.SLOT_ACCEPTANCE,
+        required: true,
+        requiresAllParticipants: false,
+        blocksScheduling: true,
+        sortOrder: 30,
+      },
+      {
         name: "Intake form",
         type: "FORM",
         stepCode: WorkflowStepCode.INTAKE_FORM,
@@ -4742,7 +4790,7 @@ const WORKFLOW_PRESET_DEFINITIONS: Record<WorkflowPresetKind, WorkflowPresetDefi
         required: true,
         requiresAllParticipants: false,
         blocksScheduling: true,
-        sortOrder: 10,
+        sortOrder: 40,
       },
       {
         name: "Availability captured from intake",
@@ -4751,7 +4799,7 @@ const WORKFLOW_PRESET_DEFINITIONS: Record<WorkflowPresetKind, WorkflowPresetDefi
         required: true,
         requiresAllParticipants: false,
         blocksScheduling: true,
-        sortOrder: 20,
+        sortOrder: 50,
       },
       {
         name: "Terms & conditions",
@@ -4761,7 +4809,7 @@ const WORKFLOW_PRESET_DEFINITIONS: Record<WorkflowPresetKind, WorkflowPresetDefi
         required: true,
         requiresAllParticipants: false,
         blocksScheduling: false,
-        sortOrder: 30,
+        sortOrder: 60,
       },
     ],
   },
@@ -4772,6 +4820,33 @@ const WORKFLOW_PRESET_DEFINITIONS: Record<WorkflowPresetKind, WorkflowPresetDefi
     description: "Recommended workflow where both participants complete required form steps.",
     steps: [
       {
+        name: "Triage review",
+        type: "REVIEW",
+        stepCode: WorkflowStepCode.TRIAGE_REVIEW,
+        required: true,
+        requiresAllParticipants: true,
+        blocksScheduling: true,
+        sortOrder: 10,
+      },
+      {
+        name: "Counsellor acceptance",
+        type: "REVIEW",
+        stepCode: WorkflowStepCode.COUNSELLOR_ACCEPTANCE,
+        required: true,
+        requiresAllParticipants: true,
+        blocksScheduling: true,
+        sortOrder: 20,
+      },
+      {
+        name: "Slot acceptance",
+        type: "REVIEW",
+        stepCode: WorkflowStepCode.SLOT_ACCEPTANCE,
+        required: true,
+        requiresAllParticipants: true,
+        blocksScheduling: true,
+        sortOrder: 30,
+      },
+      {
         name: "Intake form",
         type: "FORM",
         stepCode: WorkflowStepCode.INTAKE_FORM,
@@ -4779,7 +4854,7 @@ const WORKFLOW_PRESET_DEFINITIONS: Record<WorkflowPresetKind, WorkflowPresetDefi
         required: true,
         requiresAllParticipants: true,
         blocksScheduling: true,
-        sortOrder: 10,
+        sortOrder: 40,
       },
       {
         name: "Consent form",
@@ -4789,7 +4864,7 @@ const WORKFLOW_PRESET_DEFINITIONS: Record<WorkflowPresetKind, WorkflowPresetDefi
         required: true,
         requiresAllParticipants: true,
         blocksScheduling: true,
-        sortOrder: 20,
+        sortOrder: 50,
       },
       {
         name: "Agreement form",
@@ -4799,7 +4874,7 @@ const WORKFLOW_PRESET_DEFINITIONS: Record<WorkflowPresetKind, WorkflowPresetDefi
         required: true,
         requiresAllParticipants: true,
         blocksScheduling: true,
-        sortOrder: 30,
+        sortOrder: 60,
       },
       {
         name: "Availability captured from intake",
@@ -4808,7 +4883,7 @@ const WORKFLOW_PRESET_DEFINITIONS: Record<WorkflowPresetKind, WorkflowPresetDefi
         required: true,
         requiresAllParticipants: true,
         blocksScheduling: true,
-        sortOrder: 40,
+        sortOrder: 70,
       },
       {
         name: "Terms & conditions",
@@ -4818,7 +4893,7 @@ const WORKFLOW_PRESET_DEFINITIONS: Record<WorkflowPresetKind, WorkflowPresetDefi
         required: true,
         requiresAllParticipants: true,
         blocksScheduling: false,
-        sortOrder: 50,
+        sortOrder: 80,
       },
     ],
   },
@@ -6057,9 +6132,124 @@ export function getDocumentCodeFriendlyName(code: string) {
   }
 }
 
+// ── Review Workflow: Triage ──
+
+export async function triageCase(input: {
+  caseId: string;
+  decision: TriageDecision;
+  notes?: string;
+  actorUserId: string;
+}) {
+  return db.$transaction(async (tx) => {
+    const caseRecord = await tx.case.findUnique({
+      where: { id: input.caseId },
+      select: { id: true, status: true, reference: true },
+    });
+
+    if (!caseRecord) {
+      throw new DomainError("Case not found.", 404);
+    }
+
+    if (caseRecord.status !== CaseStatus.AWAITING_REVIEW) {
+      throw new DomainError(
+        `Case must be in AWAITING_REVIEW status to triage. Current: ${caseRecord.status}`,
+        409,
+      );
+    }
+
+    await tx.triageRecord.create({
+      data: {
+        caseId: input.caseId,
+        decision: input.decision,
+        notes: input.notes,
+        triagedByUserId: input.actorUserId,
+      },
+    });
+
+    if (input.decision === TriageDecision.DECLINED) {
+      await setCaseStatus(tx, {
+        caseId: input.caseId,
+        currentStatus: CaseStatus.AWAITING_REVIEW,
+        targetStatus: CaseStatus.CLOSED,
+        actorUserId: input.actorUserId,
+        statusReason: `Triage declined: ${input.notes ?? "no reason given"}`,
+      });
+    } else {
+      if (input.decision === TriageDecision.FLAGGED && input.notes) {
+        await tx.case.update({
+          where: { id: input.caseId },
+          data: { flags: { push: `TRIAGE_FLAG: ${input.notes}` } },
+        });
+      }
+
+      await setCaseStatus(tx, {
+        caseId: input.caseId,
+        currentStatus: CaseStatus.AWAITING_REVIEW,
+        targetStatus: CaseStatus.MATCHED,
+        actorUserId: input.actorUserId,
+        statusReason: `Triage ${input.decision.toLowerCase()}`,
+      });
+    }
+
+    // Complete the TRIAGE_REVIEW workflow step if it exists
+    await tx.caseWorkflowState.updateMany({
+      where: {
+        caseId: input.caseId,
+        status: CaseWorkflowStepStatus.PENDING,
+        step: { stepCode: WorkflowStepCode.TRIAGE_REVIEW },
+      },
+      data: {
+        status: CaseWorkflowStepStatus.COMPLETED,
+        completedAt: new Date(),
+      },
+    });
+
+    await createAuditLog(tx, {
+      caseId: input.caseId,
+      userId: input.actorUserId,
+      action: "TRIAGE_DECISION",
+      details: {
+        decision: input.decision,
+        notes: input.notes ?? null,
+      },
+    });
+
+    return tx.case.findUniqueOrThrow({ where: { id: input.caseId } });
+  }).then(async (result) => {
+    const notifType =
+      input.decision === TriageDecision.APPROVED
+        ? NotificationType.TRIAGE_APPROVED
+        : input.decision === TriageDecision.FLAGGED
+          ? NotificationType.TRIAGE_FLAGGED
+          : NotificationType.TRIAGE_DECLINED;
+
+    await createNotificationsForRole({
+      role: UserRole.OPS,
+      type: notifType,
+      title: `Case ${result.reference} triage: ${input.decision.toLowerCase()}`,
+      body: input.notes,
+      caseId: input.caseId,
+      linkUrl: `/admin/cases/${input.caseId}`,
+    }).catch(() => {});
+
+    return result;
+  });
+}
+
+export async function getTriageHistory(caseId: string) {
+  return db.triageRecord.findMany({
+    where: { caseId },
+    include: {
+      triagedBy: { select: { name: true, email: true } },
+    },
+    orderBy: { createdAt: "desc" },
+  });
+}
+
 // ---------------------------------------------------------------------------
-// Case Proposal workflow
+// Case Proposal workflow (HEAD)
 // ---------------------------------------------------------------------------
+
 
 export type ProposeCaseInput = {
   caseId: string;
@@ -6286,6 +6476,316 @@ export async function respondToCaseProposal(input: RespondToProposalInput): Prom
   });
 }
 
+// ── Review Workflow: Counsellor Proposal (main) ──
+
+export async function proposeCaseToCounsellor(input: {
+  caseId: string;
+  specialistId: string;
+  proposalNote?: string;
+  actorUserId: string;
+}) {
+  return db.$transaction(async (tx) => {
+    const caseRecord = await tx.case.findUnique({
+      where: { id: input.caseId },
+      select: {
+        id: true,
+        status: true,
+        reference: true,
+        counsellingType: true,
+        _count: { select: { participants: true } },
+      },
+    });
+
+    if (!caseRecord) {
+      throw new DomainError("Case not found.", 404);
+    }
+
+    if (caseRecord.status !== CaseStatus.MATCHED) {
+      throw new DomainError(
+        `Case must be in MATCHED status to propose. Current: ${caseRecord.status}`,
+        409,
+      );
+    }
+
+    // Check no pending proposal already exists
+    const existingProposal = await tx.caseProposal.findFirst({
+      where: { caseId: input.caseId, status: CaseProposalStatus.PENDING },
+    });
+
+    if (existingProposal) {
+      throw new DomainError("A pending proposal already exists for this case.", 409);
+    }
+
+    const specialist = await tx.specialist.findUnique({
+      where: { id: input.specialistId },
+      select: {
+        id: true,
+        name: true,
+        email: true,
+        userAccount: { select: { id: true } },
+      },
+    });
+
+    if (!specialist) {
+      throw new DomainError("Specialist not found.", 404);
+    }
+
+    // Tentative assignment
+    await tx.case.update({
+      where: { id: input.caseId },
+      data: { assignedSpecialistId: input.specialistId },
+    });
+
+    const proposal = await tx.caseProposal.create({
+      data: {
+        caseId: input.caseId,
+        specialistId: input.specialistId,
+        proposedByUserId: input.actorUserId,
+        proposalNote: input.proposalNote,
+        status: CaseProposalStatus.PENDING,
+      },
+    });
+
+    await setCaseStatus(tx, {
+      caseId: input.caseId,
+      currentStatus: CaseStatus.MATCHED,
+      targetStatus: CaseStatus.COUNSELLOR_PROPOSED,
+      actorUserId: input.actorUserId,
+      statusReason: `Proposed to counsellor: ${specialist.name}`,
+    });
+
+    await createAuditLog(tx, {
+      caseId: input.caseId,
+      userId: input.actorUserId,
+      action: "CASE_PROPOSED_TO_COUNSELLOR",
+      details: {
+        specialistId: input.specialistId,
+        specialistName: specialist.name,
+        proposalNote: input.proposalNote ?? null,
+      },
+    });
+
+    return {
+      proposal,
+      caseReference: caseRecord.reference,
+      counsellingType: caseRecord.counsellingType || "Not specified",
+      participantCount: caseRecord._count.participants,
+      specialistName: specialist.name,
+      specialistEmail: specialist.email,
+      specialistUserId: specialist.userAccount?.id ?? null,
+    };
+  }).then(async (result) => {
+    if (result.specialistUserId) {
+      await createNotification({
+        userId: result.specialistUserId,
+        type: NotificationType.CASE_PROPOSED,
+        title: `New case proposal: ${result.caseReference}`,
+        body: input.proposalNote,
+        caseId: input.caseId,
+        linkUrl: `/specialist/reviews`,
+      }).catch(() => {});
+    }
+
+    const portalUrl = `${process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000"}/specialist/reviews`;
+    void sendCaseProposalCounsellorEmail({
+      to: result.specialistEmail,
+      counsellorName: result.specialistName,
+      caseReference: result.caseReference,
+      counsellingType: result.counsellingType,
+      participantCount: result.participantCount,
+      proposalNote: input.proposalNote,
+      portalUrl,
+    })
+      .then((emailResult) =>
+        logEmail({
+          caseId: input.caseId,
+          emailType: EmailType.CASE_PROPOSAL_TO_COUNSELLOR,
+          recipientEmail: result.specialistEmail,
+          recipientName: result.specialistName,
+          subject: emailResult.subject,
+          status: emailResult.delivered ? EmailStatus.SENT : EmailStatus.FAILED,
+          providerMessageId: emailResult.providerMessageId,
+        }),
+      )
+      .catch((error) =>
+        logEmail({
+          caseId: input.caseId,
+          emailType: EmailType.CASE_PROPOSAL_TO_COUNSELLOR,
+          recipientEmail: result.specialistEmail,
+          recipientName: result.specialistName,
+          subject: `Case proposal: ${result.caseReference}`,
+          status: EmailStatus.FAILED,
+          error: domainErrorMessage(error),
+        }).catch(() => {}),
+      )
+      .catch(() => {});
+
+    return result.proposal;
+  });
+}
+
+export async function respondToCaseProposalAsCounsellor(input: {
+  proposalId: string;
+  accept: boolean;
+  responseNote?: string;
+  actorUserId: string;
+}) {
+  return db.$transaction(async (tx) => {
+    const proposal = await tx.caseProposal.findUnique({
+      where: { id: input.proposalId },
+      include: {
+        case: { select: { id: true, status: true, reference: true } },
+        specialist: { select: { id: true, name: true, userAccount: { select: { id: true } } } },
+      },
+    });
+
+    if (!proposal) {
+      throw new DomainError("Proposal not found.", 404);
+    }
+
+    if (proposal.status !== CaseProposalStatus.PENDING) {
+      throw new DomainError(`Proposal is no longer pending. Status: ${proposal.status}`, 409);
+    }
+
+    if (proposal.case.status !== CaseStatus.COUNSELLOR_PROPOSED) {
+      throw new DomainError(
+        `Case is not in COUNSELLOR_PROPOSED status. Current: ${proposal.case.status}`,
+        409,
+      );
+    }
+
+    // Verify the actor is the specialist
+    if (proposal.specialist.userAccount?.id !== input.actorUserId) {
+      throw new DomainError("Only the proposed counsellor can respond to this proposal.", 403);
+    }
+
+    if (input.accept) {
+      await tx.caseProposal.update({
+        where: { id: input.proposalId },
+        data: {
+          status: CaseProposalStatus.ACCEPTED,
+          responseNote: input.responseNote,
+          respondedAt: new Date(),
+        },
+      });
+
+      await setCaseStatus(tx, {
+        caseId: proposal.caseId,
+        currentStatus: CaseStatus.COUNSELLOR_PROPOSED,
+        targetStatus: CaseStatus.COUNSELLOR_ACCEPTED,
+        actorUserId: input.actorUserId,
+        statusReason: `Counsellor ${proposal.specialist.name} accepted`,
+      });
+
+      // Complete the COUNSELLOR_ACCEPTANCE workflow step
+      await tx.caseWorkflowState.updateMany({
+        where: {
+          caseId: proposal.caseId,
+          status: CaseWorkflowStepStatus.PENDING,
+          step: { stepCode: WorkflowStepCode.COUNSELLOR_ACCEPTANCE },
+        },
+        data: {
+          status: CaseWorkflowStepStatus.COMPLETED,
+          completedAt: new Date(),
+        },
+      });
+
+      await createAuditLog(tx, {
+        caseId: proposal.caseId,
+        userId: input.actorUserId,
+        action: "CASE_PROPOSAL_ACCEPTED",
+        details: {
+          specialistName: proposal.specialist.name,
+          responseNote: input.responseNote ?? null,
+        },
+      });
+
+      // Notify OPS
+      await createNotificationsForRole({
+        role: UserRole.OPS,
+        type: NotificationType.CASE_PROPOSAL_ACCEPTED,
+        title: `${proposal.specialist.name} accepted case ${proposal.case.reference}`,
+        body: input.responseNote,
+        caseId: proposal.caseId,
+        linkUrl: `/admin/cases/${proposal.caseId}`,
+      }).catch(() => {});
+    } else {
+      await tx.caseProposal.update({
+        where: { id: input.proposalId },
+        data: {
+          status: CaseProposalStatus.DECLINED,
+          responseNote: input.responseNote,
+          respondedAt: new Date(),
+        },
+      });
+
+      // Clear specialist assignment
+      await tx.case.update({
+        where: { id: proposal.caseId },
+        data: { assignedSpecialistId: null },
+      });
+
+      await setCaseStatus(tx, {
+        caseId: proposal.caseId,
+        currentStatus: CaseStatus.COUNSELLOR_PROPOSED,
+        targetStatus: CaseStatus.MATCHED,
+        actorUserId: input.actorUserId,
+        statusReason: `Counsellor ${proposal.specialist.name} declined`,
+      });
+
+      await createAuditLog(tx, {
+        caseId: proposal.caseId,
+        userId: input.actorUserId,
+        action: "CASE_PROPOSAL_DECLINED",
+        details: {
+          specialistName: proposal.specialist.name,
+          responseNote: input.responseNote ?? null,
+        },
+      });
+
+      // Notify OPS
+      await createNotificationsForRole({
+        role: UserRole.OPS,
+        type: NotificationType.CASE_PROPOSAL_DECLINED,
+        title: `${proposal.specialist.name} declined case ${proposal.case.reference}`,
+        body: input.responseNote,
+        caseId: proposal.caseId,
+        linkUrl: `/admin/cases/${proposal.caseId}`,
+      }).catch(() => {});
+    }
+
+    return tx.caseProposal.findUniqueOrThrow({
+      where: { id: input.proposalId },
+      include: {
+        case: true,
+        specialist: true,
+      },
+    });
+  });
+}
+
+export async function getActiveCaseProposal(caseId: string) {
+  return db.caseProposal.findFirst({
+    where: { caseId, status: CaseProposalStatus.PENDING },
+    include: {
+      specialist: { select: { id: true, name: true, email: true } },
+      proposedBy: { select: { name: true } },
+    },
+    orderBy: { createdAt: "desc" },
+  });
+}
+
+export async function getCaseProposalHistory(caseId: string) {
+  return db.caseProposal.findMany({
+    where: { caseId },
+    include: {
+      specialist: { select: { id: true, name: true } },
+      proposedBy: { select: { name: true } },
+    },
+    orderBy: { createdAt: "desc" },
+  });
+}
+
 export async function getPendingProposalsForSpecialist(specialistId: string) {
   return db.caseProposal.findMany({
     where: {
@@ -6301,6 +6801,7 @@ export async function getPendingProposalsForSpecialist(specialistId: string) {
           notes: true,
           flags: true,
           intakeReviewNotes: true,
+          intakeFormData: true,
           participants: {
             select: {
               client: {
@@ -6766,6 +7267,786 @@ export async function getPendingTimeProposalsForSpecialist(specialistId: string)
           },
         },
       },
+    },
+    orderBy: { createdAt: "desc" },
+  });
+}
+
+// ── Review Workflow: Slot Proposal (main) ──
+
+export async function proposeSlot(input: {
+  caseId: string;
+  proposedStartTime: Date;
+  proposedEndTime: Date;
+  proposedTimezone?: string;
+  proposalNote?: string;
+  actorUserId: string;
+}) {
+  return db.$transaction(async (tx) => {
+    const caseRecord = await tx.case.findUnique({
+      where: { id: input.caseId },
+      select: {
+        id: true,
+        status: true,
+        reference: true,
+        assignedSpecialistId: true,
+      },
+    });
+
+    if (!caseRecord) {
+      throw new DomainError("Case not found.", 404);
+    }
+
+    if (
+      caseRecord.status !== CaseStatus.COUNSELLOR_ACCEPTED &&
+      caseRecord.status !== CaseStatus.SLOT_PROPOSED
+    ) {
+      throw new DomainError(
+        `Case must be in COUNSELLOR_ACCEPTED or SLOT_PROPOSED to propose a slot. Current: ${caseRecord.status}`,
+        409,
+      );
+    }
+
+    if (!caseRecord.assignedSpecialistId) {
+      throw new DomainError("Case has no assigned specialist.", 409);
+    }
+
+    // Cancel any existing pending slot proposals
+    await tx.slotProposal.updateMany({
+      where: {
+        caseId: input.caseId,
+        status: { in: [SlotProposalStatus.PENDING_COUNSELLOR, SlotProposalStatus.PENDING_CLIENT] },
+      },
+      data: { status: SlotProposalStatus.CANCELLED },
+    });
+
+    const slotProposal = await tx.slotProposal.create({
+      data: {
+        caseId: input.caseId,
+        specialistId: caseRecord.assignedSpecialistId,
+        proposedByUserId: input.actorUserId,
+        proposedStartTime: input.proposedStartTime,
+        proposedEndTime: input.proposedEndTime,
+        proposedTimezone: input.proposedTimezone ?? "Europe/London",
+        proposalNote: input.proposalNote,
+        status: SlotProposalStatus.PENDING_COUNSELLOR,
+      },
+    });
+
+    if (caseRecord.status !== CaseStatus.SLOT_PROPOSED) {
+      await setCaseStatus(tx, {
+        caseId: input.caseId,
+        currentStatus: caseRecord.status,
+        targetStatus: CaseStatus.SLOT_PROPOSED,
+        actorUserId: input.actorUserId,
+        statusReason: "Slot proposed to counsellor",
+      });
+    }
+
+    await createAuditLog(tx, {
+      caseId: input.caseId,
+      userId: input.actorUserId,
+      action: "SLOT_PROPOSED",
+      details: {
+        proposedStartTime: input.proposedStartTime.toISOString(),
+        proposedEndTime: input.proposedEndTime.toISOString(),
+        proposalNote: input.proposalNote ?? null,
+      },
+    });
+
+    return {
+      slotProposal,
+      caseReference: caseRecord.reference,
+    };
+  }).then(async (result) => {
+    // Notify the specialist
+    const specialist = await db.specialist.findUnique({
+      where: { id: result.slotProposal.specialistId },
+      select: {
+        name: true,
+        email: true,
+        userAccount: { select: { id: true } },
+      },
+    });
+
+    if (specialist?.userAccount) {
+      await createNotification({
+        userId: specialist.userAccount.id,
+        type: NotificationType.SLOT_PROPOSED,
+        title: "New time slot proposed",
+        body: `Proposed: ${input.proposedStartTime.toISOString()}`,
+        caseId: input.caseId,
+        linkUrl: `/specialist/reviews`,
+      }).catch(() => {});
+    }
+
+    if (specialist?.email) {
+      const portalUrl = `${process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000"}/specialist/reviews`;
+      void sendSlotProposalToCounsellorEmail({
+        to: specialist.email,
+        counsellorName: specialist.name,
+        caseReference: result.caseReference,
+        proposedStartTime: result.slotProposal.proposedStartTime.toISOString(),
+        proposedEndTime: result.slotProposal.proposedEndTime.toISOString(),
+        proposalNote: result.slotProposal.proposalNote || undefined,
+        portalUrl,
+      })
+        .then((emailResult) =>
+          logEmail({
+            caseId: result.slotProposal.caseId,
+            emailType: EmailType.SLOT_PROPOSAL_TO_COUNSELLOR,
+            recipientEmail: specialist.email,
+            recipientName: specialist.name,
+            subject: emailResult.subject,
+            status: emailResult.delivered ? EmailStatus.SENT : EmailStatus.FAILED,
+            providerMessageId: emailResult.providerMessageId,
+          }),
+        )
+        .catch((error) =>
+          logEmail({
+            caseId: result.slotProposal.caseId,
+            emailType: EmailType.SLOT_PROPOSAL_TO_COUNSELLOR,
+            recipientEmail: specialist.email,
+            recipientName: specialist.name,
+            subject: `Session time proposed: ${result.caseReference}`,
+            status: EmailStatus.FAILED,
+            error: domainErrorMessage(error),
+          }).catch(() => {}),
+        )
+        .catch(() => {});
+    }
+
+    return result.slotProposal;
+  });
+}
+
+export async function respondToSlotAsCounsellor(input: {
+  slotProposalId: string;
+  accept: boolean;
+  responseNote?: string;
+  actorUserId: string;
+}) {
+  return db.$transaction(async (tx) => {
+    const slot = await tx.slotProposal.findUnique({
+      where: { id: input.slotProposalId },
+      include: {
+        case: { select: { id: true, status: true, reference: true } },
+        specialist: { select: { id: true, name: true, userAccount: { select: { id: true } } } },
+      },
+    });
+
+    if (!slot) {
+      throw new DomainError("Slot proposal not found.", 404);
+    }
+
+    if (slot.status !== SlotProposalStatus.PENDING_COUNSELLOR) {
+      throw new DomainError(`Slot proposal is not pending counsellor. Status: ${slot.status}`, 409);
+    }
+
+    if (slot.specialist.userAccount?.id !== input.actorUserId) {
+      throw new DomainError("Only the assigned counsellor can respond.", 403);
+    }
+
+    if (input.accept) {
+      await tx.slotProposal.update({
+        where: { id: input.slotProposalId },
+        data: {
+          status: SlotProposalStatus.PENDING_CLIENT,
+          counsellorRespondedAt: new Date(),
+          responseNote: input.responseNote,
+        },
+      });
+
+      await createAuditLog(tx, {
+        caseId: slot.caseId,
+        userId: input.actorUserId,
+        action: "SLOT_COUNSELLOR_ACCEPTED",
+        details: {
+          specialistName: slot.specialist.name,
+          responseNote: input.responseNote ?? null,
+        },
+      });
+
+      // Notify OPS that counsellor accepted, client needs to confirm
+      await createNotificationsForRole({
+        role: UserRole.OPS,
+        type: NotificationType.SLOT_COUNSELLOR_ACCEPTED,
+        title: `${slot.specialist.name} accepted slot for ${slot.case.reference}`,
+        body: "Waiting for client confirmation.",
+        caseId: slot.caseId,
+        linkUrl: `/admin/cases/${slot.caseId}`,
+      }).catch(() => {});
+    } else {
+      await tx.slotProposal.update({
+        where: { id: input.slotProposalId },
+        data: {
+          status: SlotProposalStatus.DECLINED,
+          counsellorRespondedAt: new Date(),
+          responseNote: input.responseNote,
+        },
+      });
+
+      // Case goes back to COUNSELLOR_ACCEPTED so OPS can propose a new slot
+      await setCaseStatus(tx, {
+        caseId: slot.caseId,
+        currentStatus: CaseStatus.SLOT_PROPOSED,
+        targetStatus: CaseStatus.COUNSELLOR_ACCEPTED,
+        actorUserId: input.actorUserId,
+        statusReason: `Counsellor ${slot.specialist.name} declined slot`,
+      });
+
+      await createAuditLog(tx, {
+        caseId: slot.caseId,
+        userId: input.actorUserId,
+        action: "SLOT_COUNSELLOR_DECLINED",
+        details: {
+          specialistName: slot.specialist.name,
+          responseNote: input.responseNote ?? null,
+        },
+      });
+
+      await createNotificationsForRole({
+        role: UserRole.OPS,
+        type: NotificationType.SLOT_PROPOSED,
+        title: `${slot.specialist.name} declined slot for ${slot.case.reference}`,
+        body: input.responseNote,
+        caseId: slot.caseId,
+        linkUrl: `/admin/cases/${slot.caseId}`,
+      }).catch(() => {});
+    }
+
+    const slotProposal = await tx.slotProposal.findUniqueOrThrow({
+      where: { id: input.slotProposalId },
+    });
+
+    return {
+      slotProposal,
+      acceptedContext: input.accept
+        ? {
+            caseId: slot.caseId,
+            caseReference: slot.case.reference,
+            specialistName: slot.specialist.name,
+            proposedStartTime: slot.proposedStartTime.toISOString(),
+            proposedEndTime: slot.proposedEndTime.toISOString(),
+          }
+        : null,
+    };
+  }).then(async (result) => {
+    if (!result.acceptedContext) {
+      return result.slotProposal;
+    }
+
+    const primaryParticipant = await db.caseParticipant.findFirst({
+      where: {
+        caseId: result.acceptedContext.caseId,
+        role: ParticipantRole.PRIMARY,
+      },
+      select: {
+        client: {
+          select: {
+            id: true,
+            email: true,
+          },
+        },
+      },
+    });
+
+    if (!primaryParticipant) {
+      return result.slotProposal;
+    }
+
+    const issued = await issueFormPin({
+      caseId: result.acceptedContext.caseId,
+      participantIdentifier: primaryParticipant.client.email,
+      formType: "SLOT_RESPONSE",
+      formPath: "/forms/slot-response",
+      issuedByUserId: input.actorUserId,
+      metadata: {
+        issuedFrom: "respondToSlotAsCounsellor",
+        slotProposalId: result.slotProposal.id,
+      },
+    });
+
+    const counsellorFirstName =
+      result.acceptedContext.specialistName.split(" ")[0] || result.acceptedContext.specialistName;
+
+    void sendSlotProposalToClientEmail({
+      to: issued.participantEmail,
+      clientName: issued.participantName,
+      caseReference: issued.caseReference,
+      counsellorFirstName,
+      proposedStartTime: result.acceptedContext.proposedStartTime,
+      proposedEndTime: result.acceptedContext.proposedEndTime,
+      accessUrl: issued.accessUrl,
+    })
+      .then((emailResult) =>
+        logEmail({
+          caseId: issued.caseId,
+          clientId: issued.clientId,
+          emailType: EmailType.SLOT_PROPOSAL_TO_CLIENT,
+          recipientEmail: issued.participantEmail,
+          recipientName: issued.participantName,
+          subject: emailResult.subject,
+          status: emailResult.delivered ? EmailStatus.SENT : EmailStatus.FAILED,
+          relatedFormType: issued.formType,
+          relatedFormAccessPinId: issued.pinId,
+          providerMessageId: emailResult.providerMessageId,
+        }),
+      )
+      .catch((error) =>
+        logEmail({
+          caseId: issued.caseId,
+          clientId: issued.clientId,
+          emailType: EmailType.SLOT_PROPOSAL_TO_CLIENT,
+          recipientEmail: issued.participantEmail,
+          recipientName: issued.participantName,
+          subject: `Counselling appointment proposed: ${issued.caseReference}`,
+          status: EmailStatus.FAILED,
+          relatedFormType: issued.formType,
+          relatedFormAccessPinId: issued.pinId,
+          error: domainErrorMessage(error),
+        }).catch(() => {}),
+      )
+      .catch(() => {});
+
+    void sendFormPinEmail({
+      to: issued.participantEmail,
+      participantName: issued.participantName,
+      caseReference: issued.caseReference,
+      formType: issued.formType,
+      pin: issued.pin,
+      accessUrl: issued.accessUrl,
+      expiresAt: issued.expiresAt,
+    })
+      .then((emailResult) =>
+        logEmail({
+          caseId: issued.caseId,
+          clientId: issued.clientId,
+          emailType: EmailType.FORM_PIN,
+          recipientEmail: issued.participantEmail,
+          recipientName: issued.participantName,
+          subject: emailResult.subject,
+          status: emailResult.delivered ? EmailStatus.SENT : EmailStatus.FAILED,
+          relatedFormType: issued.formType,
+          relatedFormAccessPinId: issued.pinId,
+          providerMessageId: emailResult.providerMessageId,
+        }),
+      )
+      .catch((error) =>
+        logEmail({
+          caseId: issued.caseId,
+          clientId: issued.clientId,
+          emailType: EmailType.FORM_PIN,
+          recipientEmail: issued.participantEmail,
+          recipientName: issued.participantName,
+          subject: "Your counselling form access PIN",
+          status: EmailStatus.FAILED,
+          relatedFormType: issued.formType,
+          relatedFormAccessPinId: issued.pinId,
+          error: domainErrorMessage(error),
+        }).catch(() => {}),
+      )
+      .catch(() => {});
+
+    return result.slotProposal;
+  });
+}
+
+export async function respondToSlotAsClient(input: {
+  slotProposalId: string;
+  accept: boolean;
+  tocAccepted?: boolean;
+  counterProposedStartTime?: Date;
+  counterProposedEndTime?: Date;
+}) {
+  return db.$transaction(async (tx) => {
+    const slot = await tx.slotProposal.findUnique({
+      where: { id: input.slotProposalId },
+      include: {
+        case: {
+          select: {
+            id: true,
+            status: true,
+            reference: true,
+            assignedSpecialistId: true,
+            participants: {
+              select: {
+                role: true,
+                client: {
+                  select: {
+                    id: true,
+                    email: true,
+                    firstName: true,
+                    lastName: true,
+                  },
+                },
+              },
+            },
+          },
+        },
+        specialist: {
+          select: {
+            id: true,
+            name: true,
+            email: true,
+            userAccount: { select: { id: true } },
+          },
+        },
+      },
+    });
+
+    if (!slot) {
+      throw new DomainError("Slot proposal not found.", 404);
+    }
+
+    if (slot.status !== SlotProposalStatus.PENDING_CLIENT) {
+      throw new DomainError(`Slot is not pending client response. Status: ${slot.status}`, 409);
+    }
+
+    let emailContext:
+      | {
+          type: "CONFIRMED";
+          caseId: string;
+          caseReference: string;
+          counsellorName: string;
+          counsellorEmail: string;
+          clientId: string | null;
+          clientName: string | null;
+          clientEmail: string | null;
+          confirmedStartTime: string;
+          confirmedEndTime: string;
+        }
+      | {
+          type: "COUNTER_PROPOSED";
+          caseId: string;
+          caseReference: string;
+          counsellorName: string;
+          counsellorEmail: string;
+          proposedStartTime: string;
+          proposedEndTime: string;
+        }
+      | null = null;
+
+    const primaryClient =
+      slot.case.participants.find((participant) => participant.role === ParticipantRole.PRIMARY)?.client ||
+      null;
+
+    if (input.accept) {
+      if (!input.tocAccepted) {
+        throw new DomainError("Terms of counselling must be accepted to confirm the appointment.", 400);
+      }
+
+      await tx.slotProposal.update({
+        where: { id: input.slotProposalId },
+        data: {
+          status: SlotProposalStatus.CONFIRMED,
+          clientRespondedAt: new Date(),
+          tocAcceptedAt: new Date(),
+        },
+      });
+
+      await setCaseStatus(tx, {
+        caseId: slot.caseId,
+        currentStatus: CaseStatus.SLOT_PROPOSED,
+        targetStatus: CaseStatus.SLOT_CONFIRMED,
+        actorUserId: undefined,
+        statusReason: "Client accepted slot and ToC",
+      });
+
+      // Complete the SLOT_ACCEPTANCE workflow step
+      await tx.caseWorkflowState.updateMany({
+        where: {
+          caseId: slot.caseId,
+          status: CaseWorkflowStepStatus.PENDING,
+          step: { stepCode: WorkflowStepCode.SLOT_ACCEPTANCE },
+        },
+        data: {
+          status: CaseWorkflowStepStatus.COMPLETED,
+          completedAt: new Date(),
+        },
+      });
+
+      await createAuditLog(tx, {
+        caseId: slot.caseId,
+        action: "SLOT_CLIENT_ACCEPTED",
+        details: { tocAccepted: true },
+      });
+
+      // Notify counsellor
+      if (slot.specialist.userAccount) {
+        await createNotification({
+          userId: slot.specialist.userAccount.id,
+          type: NotificationType.SLOT_CONFIRMED,
+          title: `Appointment confirmed for ${slot.case.reference}`,
+          body: `${slot.proposedStartTime.toISOString()}`,
+          caseId: slot.caseId,
+          linkUrl: `/specialist/sessions`,
+        }).catch(() => {});
+      }
+
+      // Notify OPS
+      await createNotificationsForRole({
+        role: UserRole.OPS,
+        type: NotificationType.SLOT_CONFIRMED,
+        title: `Slot confirmed for ${slot.case.reference}`,
+        caseId: slot.caseId,
+        linkUrl: `/admin/cases/${slot.caseId}`,
+      }).catch(() => {});
+
+      emailContext = {
+        type: "CONFIRMED",
+        caseId: slot.caseId,
+        caseReference: slot.case.reference,
+        counsellorName: slot.specialist.name,
+        counsellorEmail: slot.specialist.email,
+        clientId: primaryClient?.id ?? null,
+        clientName: primaryClient
+          ? `${primaryClient.firstName} ${primaryClient.lastName}`.trim()
+          : null,
+        clientEmail: primaryClient?.email ?? null,
+        confirmedStartTime: slot.proposedStartTime.toISOString(),
+        confirmedEndTime: slot.proposedEndTime.toISOString(),
+      };
+    } else if (input.counterProposedStartTime && input.counterProposedEndTime) {
+      // Counter-proposal
+      await tx.slotProposal.update({
+        where: { id: input.slotProposalId },
+        data: {
+          status: SlotProposalStatus.CLIENT_COUNTER_PROPOSED,
+          clientRespondedAt: new Date(),
+          counterProposedStartTime: input.counterProposedStartTime,
+          counterProposedEndTime: input.counterProposedEndTime,
+        },
+      });
+
+      // Create new slot proposal with the counter-proposed times
+      await tx.slotProposal.create({
+        data: {
+          caseId: slot.caseId,
+          specialistId: slot.specialistId,
+          proposedStartTime: input.counterProposedStartTime,
+          proposedEndTime: input.counterProposedEndTime,
+          proposedTimezone: slot.proposedTimezone,
+          status: SlotProposalStatus.PENDING_COUNSELLOR,
+          proposalNote: "Counter-proposed by client",
+        },
+      });
+
+      await createAuditLog(tx, {
+        caseId: slot.caseId,
+        action: "SLOT_CLIENT_COUNTER_PROPOSED",
+        details: {
+          originalStart: slot.proposedStartTime.toISOString(),
+          counterStart: input.counterProposedStartTime.toISOString(),
+          counterEnd: input.counterProposedEndTime.toISOString(),
+        },
+      });
+
+      // Notify counsellor
+      if (slot.specialist.userAccount) {
+        await createNotification({
+          userId: slot.specialist.userAccount.id,
+          type: NotificationType.SLOT_CLIENT_COUNTER_PROPOSED,
+          title: `Client proposed alternative time for ${slot.case.reference}`,
+          caseId: slot.caseId,
+          linkUrl: `/specialist/reviews`,
+        }).catch(() => {});
+      }
+
+      // Notify OPS
+      await createNotificationsForRole({
+        role: UserRole.OPS,
+        type: NotificationType.SLOT_CLIENT_COUNTER_PROPOSED,
+        title: `Client counter-proposed for ${slot.case.reference}`,
+        caseId: slot.caseId,
+        linkUrl: `/admin/cases/${slot.caseId}`,
+      }).catch(() => {});
+
+      emailContext = {
+        type: "COUNTER_PROPOSED",
+        caseId: slot.caseId,
+        caseReference: slot.case.reference,
+        counsellorName: slot.specialist.name,
+        counsellorEmail: slot.specialist.email,
+        proposedStartTime: input.counterProposedStartTime.toISOString(),
+        proposedEndTime: input.counterProposedEndTime.toISOString(),
+      };
+    } else {
+      throw new DomainError("Must either accept or provide a counter-proposal.", 400);
+    }
+
+    const slotProposal = await tx.slotProposal.findUniqueOrThrow({
+      where: { id: input.slotProposalId },
+    });
+
+    return {
+      slotProposal,
+      emailContext,
+    };
+  }).then(async (result) => {
+    if (!result.emailContext) {
+      return result.slotProposal;
+    }
+
+    if (result.emailContext.type === "CONFIRMED") {
+      const confirmedContext = result.emailContext;
+
+      void sendSlotConfirmedEmail({
+        to: confirmedContext.counsellorEmail,
+        recipientName: confirmedContext.counsellorName,
+        caseReference: confirmedContext.caseReference,
+        confirmedStartTime: confirmedContext.confirmedStartTime,
+        confirmedEndTime: confirmedContext.confirmedEndTime,
+      })
+        .then((emailResult) =>
+          logEmail({
+            caseId: confirmedContext.caseId,
+            emailType: EmailType.SLOT_CONFIRMED_COUNSELLOR,
+            recipientEmail: confirmedContext.counsellorEmail,
+            recipientName: confirmedContext.counsellorName,
+            subject: emailResult.subject,
+            status: emailResult.delivered ? EmailStatus.SENT : EmailStatus.FAILED,
+            providerMessageId: emailResult.providerMessageId,
+          }),
+        )
+        .catch((error) =>
+          logEmail({
+            caseId: confirmedContext.caseId,
+            emailType: EmailType.SLOT_CONFIRMED_COUNSELLOR,
+            recipientEmail: confirmedContext.counsellorEmail,
+            recipientName: confirmedContext.counsellorName,
+            subject: `Appointment confirmed: ${confirmedContext.caseReference}`,
+            status: EmailStatus.FAILED,
+            error: domainErrorMessage(error),
+          }).catch(() => {}),
+        )
+        .catch(() => {});
+
+      const clientEmail = confirmedContext.clientEmail;
+      const clientName = confirmedContext.clientName;
+      if (clientEmail && clientName) {
+        void sendSlotConfirmedEmail({
+          to: clientEmail,
+          recipientName: clientName,
+          caseReference: confirmedContext.caseReference,
+          confirmedStartTime: confirmedContext.confirmedStartTime,
+          confirmedEndTime: confirmedContext.confirmedEndTime,
+        })
+          .then((emailResult) =>
+            logEmail({
+              caseId: confirmedContext.caseId,
+              clientId: confirmedContext.clientId ?? undefined,
+              emailType: EmailType.SLOT_CONFIRMED_CLIENT,
+              recipientEmail: clientEmail,
+              recipientName: clientName,
+              subject: emailResult.subject,
+              status: emailResult.delivered ? EmailStatus.SENT : EmailStatus.FAILED,
+              providerMessageId: emailResult.providerMessageId,
+            }),
+          )
+          .catch((error) =>
+            logEmail({
+              caseId: confirmedContext.caseId,
+              clientId: confirmedContext.clientId ?? undefined,
+              emailType: EmailType.SLOT_CONFIRMED_CLIENT,
+              recipientEmail: clientEmail,
+              recipientName: clientName,
+              subject: `Appointment confirmed: ${confirmedContext.caseReference}`,
+              status: EmailStatus.FAILED,
+              error: domainErrorMessage(error),
+            }).catch(() => {}),
+          )
+          .catch(() => {});
+      }
+
+      return result.slotProposal;
+    }
+
+    const counterContext = result.emailContext;
+    const portalUrl = `${process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000"}/specialist/reviews`;
+    void sendSlotProposalToCounsellorEmail({
+      to: counterContext.counsellorEmail,
+      counsellorName: counterContext.counsellorName,
+      caseReference: counterContext.caseReference,
+      proposedStartTime: counterContext.proposedStartTime,
+      proposedEndTime: counterContext.proposedEndTime,
+      proposalNote: "Counter-proposed by client",
+      portalUrl,
+    })
+      .then((emailResult) =>
+        logEmail({
+          caseId: counterContext.caseId,
+          emailType: EmailType.SLOT_COUNTER_PROPOSAL,
+          recipientEmail: counterContext.counsellorEmail,
+          recipientName: counterContext.counsellorName,
+          subject: emailResult.subject,
+          status: emailResult.delivered ? EmailStatus.SENT : EmailStatus.FAILED,
+          providerMessageId: emailResult.providerMessageId,
+        }),
+      )
+      .catch((error) =>
+        logEmail({
+          caseId: counterContext.caseId,
+          emailType: EmailType.SLOT_COUNTER_PROPOSAL,
+          recipientEmail: counterContext.counsellorEmail,
+          recipientName: counterContext.counsellorName,
+          subject: `Session time proposed: ${counterContext.caseReference}`,
+          status: EmailStatus.FAILED,
+          error: domainErrorMessage(error),
+        }).catch(() => {}),
+      )
+      .catch(() => {});
+
+    return result.slotProposal;
+  });
+}
+
+export async function getActiveSlotProposal(caseId: string) {
+  return db.slotProposal.findFirst({
+    where: {
+      caseId,
+      status: {
+        in: [
+          SlotProposalStatus.PENDING_COUNSELLOR,
+          SlotProposalStatus.PENDING_CLIENT,
+          SlotProposalStatus.COUNSELLOR_ACCEPTED,
+        ],
+      },
+    },
+    include: {
+      specialist: { select: { id: true, name: true } },
+      proposedBy: { select: { name: true } },
+    },
+    orderBy: { createdAt: "desc" },
+  });
+}
+
+export async function getSlotProposalHistory(caseId: string) {
+  return db.slotProposal.findMany({
+    where: { caseId },
+    include: {
+      specialist: { select: { id: true, name: true } },
+      proposedBy: { select: { name: true } },
+    },
+    orderBy: { createdAt: "desc" },
+  });
+}
+
+export async function getPendingSlotProposalsForSpecialist(specialistId: string) {
+  return db.slotProposal.findMany({
+    where: {
+      specialistId,
+      status: SlotProposalStatus.PENDING_COUNSELLOR,
+    },
+    include: {
+      case: {
+        select: {
+          id: true,
+          reference: true,
+          counsellingType: true,
+        },
+      },
+      proposedBy: { select: { name: true } },
     },
     orderBy: { createdAt: "desc" },
   });

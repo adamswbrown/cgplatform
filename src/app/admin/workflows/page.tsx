@@ -72,6 +72,9 @@ const WORKFLOW_STEP_CODE_LABELS: Record<WorkflowStepCode, string> = {
   [WorkflowStepCode.CONSENT_FORM]: "Consent form completion",
   [WorkflowStepCode.AGREEMENT_FORM]: "Agreement form completion",
   [WorkflowStepCode.OUTTAKE_FORM]: "Outtake form completion",
+  [WorkflowStepCode.TRIAGE_REVIEW]: "Triage review",
+  [WorkflowStepCode.COUNSELLOR_ACCEPTANCE]: "Counsellor acceptance",
+  [WorkflowStepCode.SLOT_ACCEPTANCE]: "Slot acceptance",
   [WorkflowStepCode.CUSTOM]: "Custom",
 };
 

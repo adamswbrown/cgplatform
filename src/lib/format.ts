@@ -21,8 +21,12 @@ export function statusColorKey(caseStatus: string): StatusColorKey {
     case "NEW":
       return "new";
     case "AWAITING_REVIEW":
+    case "COUNSELLOR_PROPOSED":
+    case "SLOT_PROPOSED":
       return "review";
     case "MATCHED":
+    case "COUNSELLOR_ACCEPTED":
+    case "SLOT_CONFIRMED":
     case "AGREEMENT_PENDING":
     case "READY_TO_SCHEDULE":
       return "matched";
@@ -61,6 +65,10 @@ export function statusFilterGroup(caseStatus: string): StatusFilterGroup {
     case "AWAITING_REVIEW":
       return "needs_review";
     case "MATCHED":
+    case "COUNSELLOR_PROPOSED":
+    case "COUNSELLOR_ACCEPTED":
+    case "SLOT_PROPOSED":
+    case "SLOT_CONFIRMED":
     case "AGREEMENT_PENDING":
     case "READY_TO_SCHEDULE":
       return "in_progress";
