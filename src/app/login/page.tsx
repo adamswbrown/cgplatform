@@ -28,7 +28,7 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
               </div>
               <p className="cg-nav-label text-white/85">Secure Access</p>
               <h1 className="mt-1 max-w-2xl text-[clamp(2.05rem,4.8vw,3.55rem)]">
-                Operations and counsellor login
+                Operations, admin, and counsellor login
               </h1>
               <p className="mt-2 max-w-xl text-sm font-normal text-white/82">
                 Sign in to manage case workflow, counsellor assignment, scheduling references, and
@@ -39,7 +39,7 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
             <div className="cg-surface-card w-full bg-white p-6 text-[color:var(--foreground)] lg:mt-1">
               <h2>Sign in</h2>
               <p className="mt-1 text-sm text-[color:var(--muted)]">
-                Use your operations or counsellor account credentials.
+                Use your operations, admin, or counsellor account credentials.
               </p>
 
               {error ? (
@@ -76,9 +76,10 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
 
               <div className="cg-muted-card mt-5 p-3 text-sm text-[color:var(--muted)]">
                 <p className="font-medium">Demo accounts:</p>
-                <p>`ops@demo.local / password123`</p>
-                <p>`avery.specialist@demo.local / password123`</p>
-                <p>`jordan.specialist@demo.local / password123`</p>
+                <p>ops@demo.local / password123</p>
+                <p>admin@demo.local / password123</p>
+                <p>avery.specialist@demo.local / password123</p>
+                <p>jordan.specialist@demo.local / password123</p>
               </div>
             </div>
           </div>

@@ -787,6 +787,20 @@ async function main() {
     },
   });
 
+  await prisma.userAccount.create({
+    data: {
+      email: "admin@demo.local",
+      name: "Admin User",
+      passwordHash,
+      role: UserRole.OPS,
+      operationsUser: {
+        create: {
+          canOverride: true,
+        },
+      },
+    },
+  });
+
   await prisma.userAccount.createMany({
     data: [
       {
@@ -1466,6 +1480,7 @@ async function main() {
   console.log("Seed completed.");
   console.log("Login credentials:");
   console.log("  OPS: ops@demo.local / password123");
+  console.log("  Admin: admin@demo.local / password123");
   console.log("  Specialist: avery.specialist@demo.local / password123");
   console.log("  Specialist: jordan.specialist@demo.local / password123");
   console.log("Seeded cases:");

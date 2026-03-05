@@ -354,6 +354,7 @@ Response includes counts for checked, rescheduled, cancelled, unchanged, and err
 ## Demo Credentials
 
 - Ops: `ops@demo.local / password123`
+- Admin: `admin@demo.local / password123`
 - Specialist: `avery.specialist@demo.local / password123`
 - Specialist: `jordan.specialist@demo.local / password123`
 
